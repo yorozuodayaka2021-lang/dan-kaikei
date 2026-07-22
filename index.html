@@ -228,8 +228,29 @@
     </div>
   </section>
 
+  <!-- ===== チケット ===== -->
+  <section id="tab-ticket" class="tab">
+    <div class="card">
+      <h2>チケットの追加</h2>
+      <div class="row2">
+        <div><label>名称</label><input type="text" id="tName" placeholder="例：食券（昼）"></div>
+        <div><label>単価（円）</label><input type="number" id="tPrice" inputmode="numeric" min="0" placeholder="0"></div>
+      </div>
+      <label>発行枚数（任意）</label>
+      <input type="number" id="tIssued" inputmode="numeric" min="0" placeholder="未定なら空欄">
+      <button class="btn secondary" id="btnTicketAdd">チケットを追加</button>
+    </div>
+    <div id="ticketList"></div>
+    <div class="empty" id="ticketEmpty">チケットはまだありません。食券・催し券などを追加して、販売と引換を数えられます。</div>
+  </section>
+
   <!-- ===== 設定 ===== -->
   <section id="tab-settings" class="tab">
+    <div class="card">
+      <h2>記入者名（共有時の目印）</h2>
+      <input type="text" id="authorName" placeholder="例：山田">
+      <p class="note">これからの記入に名前が付きます。複数人の帳面を統合したとき、誰の記入か分かります。</p>
+    </div>
     <div class="card">
       <h2>自動バックアップ</h2>
       <div id="abSupported">
@@ -253,6 +274,11 @@
       <h2>復元（読み込み）</h2>
       <p class="note" style="margin-top:0">書き出したJSONを読み込みます。<b>現在のデータは上書きされます。</b></p>
       <input type="file" id="importFile" accept=".json,application/json">
+    </div>
+    <div class="card">
+      <h2>統合読み込み（複数人で帳面を合体）</h2>
+      <p class="note" style="margin-top:0">他の担当者が「JSONを書き出す」で作ったファイルを読み込むと、<b>今の帳面に追記で合体</b>します（同じ記入は二重になりません。上書きもされません）。</p>
+      <input type="file" id="mergeFile" accept=".json,application/json">
     </div>
     <div class="card">
       <h2>費目の編集</h2>
@@ -285,6 +311,7 @@
   <button data-tab="ledger"><span class="ico">📒</span>帳面</button>
   <button data-tab="summary"><span class="ico">🧮</span>収支表</button>
   <button data-tab="receipt" id="navReceipt"><span class="ico">🧾</span>レシート<span class="badge" id="receiptBadge" style="display:none">0</span></button>
+  <button data-tab="ticket"><span class="ico">🎫</span>チケット</button>
   <button data-tab="settings"><span class="ico">⚙️</span>設定</button>
 </nav>
 
@@ -324,6 +351,9 @@
       <label>費目</label><select id="aCat"></select>
       <label>摘要</label><input type="text" id="aMemo" placeholder="レシートの内容">
       <label>金額（円）</label><input type="number" id="aAmt" inputmode="numeric" min="0" placeholder="レシートの金額を入力">
+      <button class="btn secondary" id="btnOcr" style="margin-top:10px">画像から金額を読み取る</button>
+      <div class="note" id="ocrStatus" style="display:none"></div>
+      <div id="ocrChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
       <button class="btn" id="btnAssign">この内容で帳面に記入する</button>
     </div>
     <div id="assignDone" style="display:none">
@@ -2651,7 +2681,7 @@ const DEFAULT_CATS = {
   out: ["輸送・交通", "宿泊・食事", "行事・催し", "チケット制作", "救護・衛生", "事務・雑費", "その他出金"]
 };
 
-let state = { txs: [], cats: null, receipts: [] };
+let state = { txs: [], cats: null, receipts: [], tickets: [], author: "" };
 // txs: {id, date, kind(in|out), cat, memo, amt, receiptId|null}
 // receipts: {id, addedAt, txId|null}  画像本体はIndexedDB
 
@@ -2745,7 +2775,7 @@ function shrinkImage(file, maxSide = 1400) {
 function load() {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) state = Object.assign({ txs: [], cats: null, receipts: [] }, JSON.parse(raw));
+    if (raw) state = Object.assign({ txs: [], cats: null, receipts: [], tickets: [], author: "" }, JSON.parse(raw));
   } catch (e) { /* 壊れていたら初期状態のまま */ }
   if (!state.cats) state.cats = JSON.parse(JSON.stringify(DEFAULT_CATS));
 }
@@ -2822,7 +2852,8 @@ $("btnSave").addEventListener("click", async () => {
     cat: $("fCat").value,
     memo: $("fMemo").value.trim(),
     amt: amt,
-    receiptId: null
+    receiptId: null,
+    author: state.author || ""
   };
   const file = $("fReceipt").files[0];
   if (file) {
@@ -2875,10 +2906,11 @@ function renderLedger() {
   txs.forEach((t) => {
     const d = document.createElement("div");
     d.className = "entry";
+    const who = t.author ? '<span style="color:var(--sub)">（' + esc(t.author) + '）</span>' : "";
     d.innerHTML =
       '<span class="date">' + t.date.slice(5).replace("-", "/") + "</span>" +
       '<span class="body"><span class="cat">' + esc(t.cat) + "</span>" +
-      '<div class="memo">' + esc(t.memo || "&nbsp;") + "</div></span>" +
+      '<div class="memo">' + (t.memo ? esc(t.memo) + " " : "") + who + (t.memo || who ? "" : "&nbsp;") + "</div></span>" +
       (t.receiptId ? '<span class="clip">🧾</span>' : "") +
       '<span class="amt ' + t.kind + '">' + (t.kind === "in" ? "+" : "−") + yen(t.amt).slice(1) + "</span>";
     d.addEventListener("click", () => openEdit(t.id));
@@ -3046,6 +3078,8 @@ async function openAssign(rid) {
     fillCatSelect("aCat", "out");
     $("aDate").value = today();
     $("aMemo").value = ""; $("aAmt").value = "";
+    $("ocrStatus").style.display = "none"; $("ocrStatus").textContent = "";
+    $("ocrChips").innerHTML = "";
   }
   $("assignOverlay").classList.add("open");
 }
@@ -3062,7 +3096,8 @@ $("btnAssign").addEventListener("click", () => {
     cat: $("aCat").value,
     memo: $("aMemo").value.trim(),
     amt: amt,
-    receiptId: r.id
+    receiptId: r.id,
+    author: state.author || ""
   };
   state.txs.push(tx);
   r.txId = tx.id;
@@ -3093,6 +3128,80 @@ function closeOverlays() {
 document.querySelectorAll(".overlay").forEach((o) => {
   o.addEventListener("click", (e) => { if (e.target === o) closeOverlays(); });
 });
+
+/* ---------- チケット管理 ---------- */
+$("btnTicketAdd").addEventListener("click", () => {
+  const name = $("tName").value.trim();
+  const price = Number($("tPrice").value);
+  if (!name) return toast("名称を入れてください");
+  if (!price || price < 0) return toast("単価を入れてください");
+  const issued = Number($("tIssued").value) || 0;
+  state.tickets.push({ id: uid(), name, price, issued, sold: 0, redeemed: 0, posted: 0 });
+  save();
+  $("tName").value = ""; $("tPrice").value = ""; $("tIssued").value = "";
+  toast("チケットを追加しました");
+  renderTickets();
+});
+
+function tRow(id, field, label, val) {
+  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">' +
+    '<span style="font-size:13px;color:var(--sub)">' + label + '</span>' +
+    '<span style="display:flex;align-items:center;gap:10px">' +
+      '<button data-adj="' + id + '|' + field + '|-1" style="width:42px;height:42px;font-size:20px;border:1px solid var(--line);border-radius:10px;background:#fff">−</button>' +
+      '<span style="font-size:20px;font-weight:700;min-width:44px;text-align:center">' + val + '</span>' +
+      '<button data-adj="' + id + '|' + field + '|1" style="width:42px;height:42px;font-size:20px;border:1px solid var(--line);border-radius:10px;background:var(--accent-soft)">＋</button>' +
+    '</span></div>';
+}
+
+function renderTickets() {
+  const list = $("ticketList");
+  list.innerHTML = "";
+  $("ticketEmpty").style.display = state.tickets.length ? "none" : "block";
+  for (const t of state.tickets) {
+    const unposted = t.sold - (t.posted || 0);
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">' +
+        '<span style="font-weight:700">' + esc(t.name) + '</span>' +
+        '<span style="font-size:12px;color:var(--sub)">単価 ' + yen(t.price) + (t.issued ? '｜発行 ' + t.issued + '枚' : '') + '</span>' +
+      '</div>' +
+      tRow(t.id, "sold", "販売", t.sold) +
+      tRow(t.id, "redeemed", "引換", t.redeemed) +
+      '<div style="display:flex;justify-content:space-between;margin-top:10px;font-size:14px">' +
+        '<span style="font-weight:600">売上 ' + yen(t.sold * t.price) + '</span>' +
+        '<span style="color:var(--sub)">帳面記入済み ' + (t.posted || 0) + '枚</span>' +
+      '</div>' +
+      (unposted > 0
+        ? '<button class="btn" data-post="' + t.id + '">未記入の売上を帳面へ（' + unposted + '枚 ' + yen(unposted * t.price) + '）</button>'
+        : '') +
+      '<button class="btn danger" data-del="' + t.id + '">このチケットを削除</button>';
+    list.appendChild(card);
+  }
+  list.querySelectorAll("[data-adj]").forEach((b) => b.addEventListener("click", () => {
+    const [id, field, d] = b.dataset.adj.split("|");
+    const t = state.tickets.find((x) => x.id === id);
+    if (!t) return;
+    t[field] = Math.max(0, (t[field] || 0) + Number(d));
+    save(); renderTickets();
+  }));
+  list.querySelectorAll("[data-post]").forEach((b) => b.addEventListener("click", () => {
+    const t = state.tickets.find((x) => x.id === b.dataset.post);
+    if (!t) return;
+    const diff = t.sold - (t.posted || 0);
+    if (diff <= 0) return;
+    state.txs.push({ id: uid(), date: today(), kind: "in", cat: "チケット売上",
+      memo: "チケット売上：" + t.name + " " + diff + "枚", amt: diff * t.price,
+      receiptId: null, author: state.author || "" });
+    t.posted = t.sold;
+    save(); toast("帳面に記入しました " + yen(diff * t.price)); renderAll();
+  }));
+  list.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => {
+    if (!confirm("このチケットを削除しますか？（帳面の記入は残ります）")) return;
+    state.tickets = state.tickets.filter((x) => x.id !== b.dataset.del);
+    save(); renderTickets();
+  }));
+}
 
 /* ---------- バックアップ共通 ---------- */
 async function buildBackupPayload() {
@@ -3248,8 +3357,9 @@ $("importFile").addEventListener("change", async (e) => {
     const payload = JSON.parse(await f.text());
     if (payload.app !== "ojiba_kaikei") throw new Error("形式違い");
     await imgClear();
-    state = Object.assign({ txs: [], cats: null, receipts: [] }, payload.state);
+    state = Object.assign({ txs: [], cats: null, receipts: [], tickets: [], author: "" }, payload.state);
     if (!state.cats) state.cats = JSON.parse(JSON.stringify(DEFAULT_CATS));
+    if (!Array.isArray(state.tickets)) state.tickets = [];
     for (const [id, dataURL] of Object.entries(payload.images || {})) {
       await imgPut(id, dataURLToBlob(dataURL));
     }
@@ -3260,6 +3370,63 @@ $("importFile").addEventListener("change", async (e) => {
     toast("復元に失敗しました（ファイルを確認）");
   }
   e.target.value = "";
+});
+
+/* ---------- 統合読み込み（複数人の帳面を合体） ---------- */
+$("mergeFile").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try {
+    const payload = JSON.parse(await f.text());
+    if (payload.app !== "ojiba_kaikei") throw new Error("形式違い");
+    const incoming = payload.state || {};
+    const haveTx = new Set(state.txs.map((t) => t.id));
+    let addedTx = 0, addedImg = 0;
+    for (const t of (incoming.txs || [])) {
+      if (haveTx.has(t.id)) continue;      // 同じ記入は二重取り込みしない
+      // レシート画像も連れてくる
+      if (t.receiptId && payload.images && payload.images[t.receiptId]) {
+        if (!state.receipts.some((r) => r.id === t.receiptId)) {
+          await imgPut(t.receiptId, dataURLToBlob(payload.images[t.receiptId]));
+          const src = (incoming.receipts || []).find((r) => r.id === t.receiptId);
+          state.receipts.push({ id: t.receiptId, addedAt: (src && src.addedAt) || Date.now(), txId: t.id });
+          addedImg++;
+        }
+      }
+      state.txs.push(t);
+      haveTx.add(t.id);
+      addedTx++;
+    }
+    // 未割り振りレシートも取り込む（重複回避）
+    for (const r of (incoming.receipts || [])) {
+      if (r.txId) continue;
+      if (state.receipts.some((x) => x.id === r.id)) continue;
+      if (payload.images && payload.images[r.id]) {
+        await imgPut(r.id, dataURLToBlob(payload.images[r.id]));
+        state.receipts.push({ id: r.id, addedAt: r.addedAt || Date.now(), txId: null });
+        addedImg++;
+      }
+    }
+    // 相手の費目で不足分を追加（既存の並びは保つ）
+    for (const kind of ["in", "out"]) {
+      for (const c of ((incoming.cats && incoming.cats[kind]) || [])) {
+        if (!state.cats[kind].includes(c)) state.cats[kind].push(c);
+      }
+    }
+    save();
+    toast("統合しました（記入 " + addedTx + "件・画像 " + addedImg + "枚を追加）");
+    renderAll();
+  } catch (err) {
+    toast("統合に失敗しました（ファイルを確認）");
+  }
+  e.target.value = "";
+});
+
+/* ---------- 記入者名 ---------- */
+$("authorName").addEventListener("change", () => {
+  state.author = $("authorName").value.trim();
+  save();
+  toast(state.author ? "記入者名を「" + state.author + "」にしました" : "記入者名を空にしました");
 });
 $("btnSaveCats").addEventListener("click", () => {
   const parse = (s) => s.split("\n").map((x) => x.trim()).filter(Boolean);
@@ -3275,7 +3442,7 @@ $("btnWipe").addEventListener("click", async () => {
   if (!confirm("本当に消去しますか？この操作は元に戻せません。")) return;
   await imgClear();
   localStorage.removeItem(LS_KEY);
-  state = { txs: [], cats: JSON.parse(JSON.stringify(DEFAULT_CATS)), receipts: [] };
+  state = { txs: [], cats: JSON.parse(JSON.stringify(DEFAULT_CATS)), receipts: [], tickets: [], author: "" };
   toast("初期化しました");
   renderAll();
 });
@@ -3296,6 +3463,98 @@ function renderShareQR() {
   $("qrUrl").textContent = url;
 }
 
+/* ---------- レシートOCR（端末内で完結・画像は外部に出ない） ---------- */
+let ocrLibLoading = null;
+let ocrWorker = null;
+
+function loadOcrLib() {
+  if (window.Tesseract) return Promise.resolve();
+  if (ocrLibLoading) return ocrLibLoading;
+  ocrLibLoading = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "./ocr/tesseract.min.js";
+    s.onload = res;
+    s.onerror = () => rej(new Error("OCRライブラリを読み込めません"));
+    document.head.appendChild(s);
+  });
+  return ocrLibLoading;
+}
+
+async function getOcrWorker(onProgress) {
+  await loadOcrLib();
+  if (ocrWorker) return ocrWorker;
+  const abs = (p) => new URL(p, location.href).href;
+  ocrWorker = await Tesseract.createWorker("jpn", 1, {
+    workerPath: abs("./ocr/worker.min.js"),
+    corePath: abs("./ocr/"),
+    langPath: abs("./ocr/"),
+    gzip: true,
+    logger: (m) => {
+      if (onProgress && m.status === "recognizing text") onProgress(m.progress);
+    }
+  });
+  return ocrWorker;
+}
+
+// 全角英数記号→半角
+function toHalf(s) {
+  return s.replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0)).replace(/　/g, " ");
+}
+// 認識テキストから金額候補を拾う（大きい額・合計/計の近くを優先）
+function extractAmounts(text) {
+  const byN = new Map();
+  const lines = toHalf(text).split(/\r?\n/);
+  lines.forEach((line, i) => {
+    const re = /([¥\\￥]?)\s*(\d{1,3}(?:,\d{3})+|\d+)/g;
+    let m;
+    while ((m = re.exec(line)) !== null) {
+      const n = parseInt(m[2].replace(/,/g, ""), 10);
+      if (!n || n < 10 || n > 9999999) continue;
+      let score = 0;
+      if (/合\s*計|小\s*計|税込|総\s*額|買\s*上|預|お会計|計/.test(line)) score += 100;
+      if (m[1]) score += 30;                          // ¥ 記号付き
+      score += Math.min(n, 100000) / 10000;           // 大きい額を少し優先
+      score += (i / Math.max(lines.length, 1)) * 5;   // 下の方を少し優先
+      byN.set(n, Math.max(byN.get(n) || 0, score));
+    }
+  });
+  return [...byN.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map((e) => e[0]);
+}
+
+$("btnOcr").addEventListener("click", async () => {
+  const r = state.receipts.find((x) => x.id === assignId);
+  if (!r) return;
+  const blob = await imgGet(r.id);
+  if (!blob) return toast("画像が見つかりません");
+  const st = $("ocrStatus");
+  st.style.display = "block";
+  st.textContent = "準備中…（初回は読み取り部品の取得に少し時間がかかります）";
+  $("ocrChips").innerHTML = "";
+  $("btnOcr").disabled = true;
+  try {
+    const worker = await getOcrWorker((p) => { st.textContent = "読み取り中… " + Math.round(p * 100) + "%"; });
+    const { data } = await worker.recognize(blob);
+    const amts = extractAmounts(data.text || "");
+    if (!amts.length) {
+      st.textContent = "金額を読み取れませんでした。手入力してください。";
+      return;
+    }
+    st.textContent = "候補をタップして金額を入れてください：";
+    amts.forEach((n) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.textContent = yen(n);
+      chip.style.cssText = "padding:8px 12px;font-size:15px;border:1px solid var(--accent);border-radius:20px;background:var(--accent-soft);color:var(--accent)";
+      chip.addEventListener("click", () => { $("aAmt").value = n; toast("金額を入れました " + yen(n)); });
+      $("ocrChips").appendChild(chip);
+    });
+  } catch (e) {
+    st.textContent = "読み取りに失敗しました（" + (e && e.message || e) + "）。手入力してください。";
+  } finally {
+    $("btnOcr").disabled = false;
+  }
+});
+
 /* ---------- トースト ---------- */
 let toastTimer = null;
 function toast(msg) {
@@ -3312,6 +3571,8 @@ function renderAll() {
   renderLedger();
   renderSummary();
   renderReceipts();
+  renderTickets();
+  $("authorName").value = state.author || "";
   $("catInText").value = state.cats.in.join("\n");
   $("catOutText").value = state.cats.out.join("\n");
 }
