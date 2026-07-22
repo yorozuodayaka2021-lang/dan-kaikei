@@ -269,9 +269,11 @@
       </div>
     </div>
     <div class="card">
-      <h2>バックアップ（書き出し）</h2>
-      <p class="note" style="margin-top:0">帳面データをJSONファイルに保存します。別端末への引っ越しや控えに。<br>※レシート画像も含むためファイルが大きくなることがあります。</p>
-      <button class="btn secondary" id="btnExport">JSONを書き出す</button>
+      <h2>バックアップ（共有・書き出し）</h2>
+      <p class="note" style="margin-top:0">帳面データをJSONにします。別端末への引っ越し・控え・複数人での合体に。<br>※レシート画像も含むためファイルが大きくなることがあります。</p>
+      <button class="btn" id="btnShare">共有する（LINE・AirDropなどへ）</button>
+      <button class="btn secondary" id="btnExport">ファイルに書き出す</button>
+      <p class="note" id="shareNote" style="display:none">このブラウザは直接共有に非対応です。「ファイルに書き出す」で保存してから送ってください。</p>
     </div>
     <div class="card">
       <h2>復元（読み込み）</h2>
@@ -3375,15 +3377,44 @@ $("btnAbStop").addEventListener("click", async () => {
 });
 
 /* ---------- 設定 ---------- */
-$("btnExport").addEventListener("click", async () => {
+async function makeBackupFile() {
   const payload = await buildBackupPayload();
-  const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "団会計バックアップ_" + today() + ".json";
-  a.click();
+  const fname = "団会計バックアップ_" + today() + ".json";
+  const file = new File([JSON.stringify(payload)], fname, { type: "application/json" });
   abMetaSet({ lastAt: new Date().toISOString(), pending: 0 });
   updateAbUI();
+  return { file, fname };
+}
+function downloadFile(file, fname) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file);
+  a.download = fname;
+  a.click();
+}
+// 共有（対応端末は共有シート、非対応はファイル書き出しにフォールバック）
+$("btnShare").addEventListener("click", async () => {
+  const { file, fname } = await makeBackupFile();
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: "団会計バックアップ",
+        text: "団会計の帳面データです。アプリの「設定 → 統合読み込み」で取り込めます。"
+      });
+      toast("共有しました");
+      return;
+    } catch (e) {
+      if (e && e.name === "AbortError") return;   // ユーザーがキャンセル
+      // それ以外は下でダウンロードにフォールバック
+    }
+  }
+  downloadFile(file, fname);
+  toast("書き出しました（共有非対応のため保存）");
+});
+// 従来のファイル書き出し
+$("btnExport").addEventListener("click", async () => {
+  const { file, fname } = await makeBackupFile();
+  downloadFile(file, fname);
   toast("書き出しました");
 });
 function blobToDataURL(blob) {
@@ -3637,6 +3668,17 @@ function renderAll() {
   fillCatSelect("fCat", "in");
   await abInit();
   renderShareQR();
+  // 共有API非対応（多くのPCブラウザ）なら共有ボタンを隠して注記を出す
+  try {
+    const probe = new File(["{}"], "probe.json", { type: "application/json" });
+    if (!(navigator.canShare && navigator.canShare({ files: [probe] }))) {
+      $("btnShare").style.display = "none";
+      $("shareNote").style.display = "block";
+    }
+  } catch (e) {
+    $("btnShare").style.display = "none";
+    $("shareNote").style.display = "block";
+  }
   renderAll();
   if ("serviceWorker" in navigator && location.protocol === "https:") {
     navigator.serviceWorker.register("./sw.js");
