@@ -147,6 +147,24 @@
   }
   .toast.show { opacity: .92; }
   textarea.io { width: 100%; height: 110px; font-size: 11px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+  /* 印刷／PDF */
+  #printArea { display: none; }
+  #printArea h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  #printArea .pmeta { font-size: 12px; color: #444; margin-bottom: 14px; }
+  #printArea table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  #printArea th, #printArea td { padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: left; }
+  #printArea td.num, #printArea th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  #printArea td.ind { padding-left: 20px; }
+  #printArea tr.sec td { font-weight: 700; background: #f0f0f0; }
+  #printArea tr.subt td { font-weight: 700; }
+  #printArea tr.tot td { font-weight: 700; border-top: 2px solid #000; border-bottom: 2px double #000; }
+  #printArea td.muted { color: #888; }
+  #printArea .pfoot { margin-top: 16px; font-size: 11px; color: #666; }
+  @media print {
+    body > header, body > main, body > nav, .overlay, .toast { display: none !important; }
+    body { background: #fff; padding: 0; }
+    #printArea { display: block !important; padding: 12mm 10mm; color: #000; }
+  }
 </style>
 </head>
 <body>
@@ -212,7 +230,9 @@
       <h2>収支計算表（費目別）</h2>
       <table id="summaryTable"></table>
       <p class="note">※ 帳面の記入から自動集計。精算・会計報告の下書きに使えます。</p>
+      <button class="btn" id="btnPdfSummary">PDFにする（印刷 → PDFで保存）</button>
       <button class="btn secondary" id="btnCopySummary">収支表をテキストでコピー</button>
+      <p class="note">PDFは、印刷ダイアログの送信先で「PDFに保存」（iPhoneは共有→ブックへ保存など）を選ぶと作れます。</p>
     </div>
   </section>
 
@@ -370,6 +390,9 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- 印刷／PDF専用エリア（画面では非表示・印刷時のみ表示） -->
+<div id="printArea"></div>
 
 <script>
 //---------------------------------------------------------------------
@@ -3020,6 +3043,41 @@ $("btnCopySummary").addEventListener("click", () => {
   navigator.clipboard.writeText(lines.join("\n"))
     .then(() => toast("コピーしました"))
     .catch(() => toast("コピーできませんでした"));
+});
+
+/* ---------- 収支表をPDFに（印刷 → PDFで保存） ---------- */
+function buildSummaryPrintRows() {
+  const sum = (kind) => state.txs.filter((t) => t.kind === kind).reduce((s, t) => s + t.amt, 0);
+  const byCat = (kind) => {
+    const m = new Map();
+    state.txs.filter((t) => t.kind === kind).forEach((t) => m.set(t.cat, (m.get(t.cat) || 0) + t.amt));
+    return m;
+  };
+  const cnt = (kind, cat) => state.txs.filter((t) => t.kind === kind && t.cat === cat).length;
+  let rows = "";
+  for (const [label, kind] of [["【収入の部】", "in"], ["【支出の部】", "out"]]) {
+    rows += `<tr class="sec"><td colspan="3">${label}</td></tr>`;
+    const m = byCat(kind);
+    if (!m.size) rows += '<tr><td colspan="3" class="muted">（記入なし）</td></tr>';
+    for (const [cat, v] of m) {
+      rows += `<tr><td class="ind">${esc(cat)}</td><td class="num">${cnt(kind, cat)}</td><td class="num">${yen(v)}</td></tr>`;
+    }
+    rows += `<tr class="subt"><td>${kind === "in" ? "収入合計" : "支出合計"}</td><td></td><td class="num">${yen(sum(kind))}</td></tr>`;
+  }
+  rows += `<tr class="tot"><td>差引残高</td><td></td><td class="num">${yen(sum("in") - sum("out"))}</td></tr>`;
+  return rows;
+}
+$("btnPdfSummary").addEventListener("click", () => {
+  if (!state.txs.length) return toast("記入がありません");
+  const title = "団会計 収支計算表";   // ← 公開版では _regen.js で「団会計 収支計算表」に一般化
+  const meta = today() + " 時点" + (state.author ? "　／　記入者：" + esc(state.author) : "");
+  $("printArea").innerHTML =
+    `<h1>${title}</h1>` +
+    `<div class="pmeta">${meta}</div>` +
+    `<table><thead><tr><th>費目</th><th class="num">件数</th><th class="num">金額</th></tr></thead>` +
+    `<tbody>${buildSummaryPrintRows()}</tbody></table>` +
+    `<div class="pfoot">この団会計アプリで作成</div>`;
+  window.print();
 });
 
 /* ---------- レシート ---------- */
