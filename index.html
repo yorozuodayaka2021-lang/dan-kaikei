@@ -90,6 +90,12 @@
   tr.total td { font-weight: 700; border-top: 2px solid var(--ink); }
   .sec-in td:first-child { color: var(--in); }
   .sec-out td:first-child { color: var(--out); }
+  /* 帳面の合計 */
+  #ledgerTotals { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin: 10px 0 4px; background: #fff; }
+  #ledgerTotals .tline { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; padding: 3px 0; }
+  #ledgerTotals .tline b { font-size: 15px; font-variant-numeric: tabular-nums; }
+  #ledgerTotals .tdiff { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 6px; }
+  #ledgerTotals .tnote { font-size: 11px; color: var(--sub); margin-top: 4px; }
   /* 決算書（様式どおりの見た目） */
   .rptWrap { overflow-x: auto; }
   .rpt { min-width: 480px; }
@@ -243,6 +249,7 @@
         </select>
         <select id="filterCat"><option value="">費目：すべて</option></select>
       </div>
+      <div id="ledgerTotals"></div>
       <div id="ledgerList"></div>
     </div>
   </section>
@@ -2771,7 +2778,7 @@ var qrcode = function() {
    ============================================================ */
 
 // 版の目印。PWA公開版の sw.js の CACHE と必ず同じ番号にすること。
-const APP_VERSION = "v14（2026-07-23）";
+const APP_VERSION = "v15（2026-07-23）";
 const LS_KEY = "ojiba_kaikei_v1";
 const DEFAULT_CATS = {
   in:  ["団費（大人）", "団費（小人）", "宿泊御供", "食事御供", "バス費用（集金）", "チケット売上", "その他入金"],
@@ -2794,7 +2801,11 @@ let state = blankState();
 // budget: {"in:費目名": 金額, "out:費目名": 金額}  決算書の予算欄
 
 const $ = (id) => document.getElementById(id);
-const yen = (n) => "¥" + Number(n || 0).toLocaleString("ja-JP");
+// マイナスは「−¥1,000」の形にする（「¥-1,000」だと読みにくいため）
+const yen = (n) => {
+  const v = Number(n || 0);
+  return (v < 0 ? "−¥" : "¥") + Math.abs(v).toLocaleString("ja-JP");
+};
 const today = () => new Date().toISOString().slice(0, 10);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
@@ -3070,6 +3081,23 @@ function renderLedger() {
   const list = $("ledgerList");
   list.innerHTML = "";
   const txs = sortedTxs().filter((t) => (!fk || t.kind === fk) && (!fc || t.cat === fc));
+
+  // 合計（絞り込み中は、その絞り込んだぶんの合計）
+  const filtered = !!(fk || fc);
+  const sIn = txs.filter((t) => t.kind === "in").reduce((s, t) => s + t.amt, 0);
+  const sOut = txs.filter((t) => t.kind === "out").reduce((s, t) => s + t.amt, 0);
+  const carry = state.carryover || 0;
+  let th = '<div class="tline"><span style="color:var(--in)">収入合計</span><b style="color:var(--in)">' + yen(sIn) + "</b></div>" +
+    '<div class="tline"><span style="color:var(--out)">支出合計</span><b style="color:var(--out)">' + yen(sOut) + "</b></div>" +
+    '<div class="tline tdiff"><span>差引</span><b>' + yen(sIn - sOut) + "</b></div>";
+  if (!filtered && carry) {
+    th += '<div class="tline"><span>前年度繰越金</span><b>' + yen(carry) + "</b></div>" +
+      '<div class="tline tdiff"><span style="font-weight:700">残高（次年度繰越金）</span><b>' + yen(carry + sIn - sOut) + "</b></div>";
+  }
+  th += '<div class="tnote">' + txs.length + "件" +
+    (filtered ? "／絞り込み中の合計です（全体は絞り込みを『すべて』に戻すと出ます）" : "") + "</div>";
+  $("ledgerTotals").innerHTML = th;
+
   if (!txs.length) {
     list.innerHTML = '<div class="empty">記入はまだありません</div>';
     return;
