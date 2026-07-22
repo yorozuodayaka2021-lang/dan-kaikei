@@ -1,0 +1,15 @@
+{
+  "name": "団会計（テスト版）",
+  "short_name": "団会計",
+  "description": "収支・出入金・レシート管理の簡易会計アプリ。データは端末内のみに保存。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f4f0",
+  "theme_color": "#2e6e4e",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
