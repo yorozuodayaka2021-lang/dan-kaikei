@@ -331,6 +331,12 @@
   <!-- ===== 設定 ===== -->
   <section id="tab-settings" class="tab">
     <div class="card">
+      <h2>このアプリのバージョン</h2>
+      <div class="note" id="appVersion" style="font-weight:700;font-size:15px;color:var(--ink)"></div>
+      <button class="btn secondary" id="btnUpdateApp">最新版に更新する</button>
+      <p class="note">画面の見た目や項目が説明と違うときは、ここを押してください。通信して最新版を取り直します。<b>帳面・レシート・チケットのデータは消えません。</b></p>
+    </div>
+    <div class="card">
       <h2>記入者名（共有時の目印）</h2>
       <input type="text" id="authorName" placeholder="例：山田">
       <p class="note">これからの記入に名前が付きます。複数人の帳面を統合したとき、誰の記入か分かります。</p>
@@ -2764,6 +2770,8 @@ var qrcode = function() {
    - 外部通信なし。データはすべて端末内。
    ============================================================ */
 
+// 版の目印。PWA公開版の sw.js の CACHE と必ず同じ番号にすること。
+const APP_VERSION = "v14（2026-07-23）";
 const LS_KEY = "ojiba_kaikei_v1";
 const DEFAULT_CATS = {
   in:  ["団費（大人）", "団費（小人）", "宿泊御供", "食事御供", "バス費用（集金）", "チケット売上", "その他入金"],
@@ -3957,6 +3965,23 @@ $("btnSaveCats").addEventListener("click", () => {
   toast("費目を保存しました");
   renderAll();
 });
+/* ---------- 版の表示と更新 ---------- */
+$("appVersion").textContent = APP_VERSION;
+$("btnUpdateApp").addEventListener("click", async () => {
+  toast("最新版を取りに行きます…");
+  try {
+    if (window.caches) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));   // 画面の控えだけ消す（帳面データは別の場所なので残る）
+    }
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+  } catch (e) { /* 消せなくても読み直しは試す */ }
+  setTimeout(() => location.reload(), 500);
+});
+
 $("btnWipe").addEventListener("click", async () => {
   if (!confirm("全データ（帳面・レシート・費目）を消去します。よろしいですか？")) return;
   if (!confirm("本当に消去しますか？この操作は元に戻せません。")) return;

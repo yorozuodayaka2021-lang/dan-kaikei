@@ -2,7 +2,7 @@
 // オフラインでもアプリが開けるよう、アプリ本体をキャッシュする。
 // 更新を配信するときは CACHE のバージョン番号を上げること。
 "use strict";
-const CACHE = "dan-kaikei-v13";
+const CACHE = "dan-kaikei-v14";
 const ASSETS = [
   "./",
   "./index.html",
@@ -30,6 +30,23 @@ self.addEventListener("fetch", (e) => {
   if (e.request.method !== "GET") return;
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;   // 同一オリジンのみ扱う
+
+  // アプリ本体（ページ）だけは、まず通信で新しいものを取りに行く。
+  // 控えを先に返すと、更新が届くのが次の次の起動になってしまうため。
+  // 通信できないときは控えを返すので、オフラインでもそのまま開ける。
+  if (e.request.mode === "navigate") {
+    e.respondWith(
+      fetch(e.request).then((res) => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put("./index.html", copy));
+        }
+        return res;
+      }).catch(() => caches.match("./index.html", { ignoreSearch: true }))
+    );
+    return;
+  }
+
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then((cached) => {
       if (cached) return cached;
