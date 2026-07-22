@@ -3512,15 +3512,36 @@ $("btnTicketAdd").addEventListener("click", () => {
   renderTickets();
 });
 
-function tRow(id, field, label, val) {
-  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">' +
-    '<span style="font-size:13px;color:var(--sub)">' + label + '</span>' +
-    '<span style="display:flex;align-items:center;gap:8px">' +
+// 枚数の行。数字を入れると「合計」に足され、入力欄は0に戻る（10円券などを何度も数えるため）。
+function tRow(id, field, label, unit, total) {
+  return '<div style="margin-top:12px">' +
+    '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">' +
+      '<span style="font-size:13px;color:var(--sub)">' + label +
+        '<span style="margin-left:6px;font-size:11px">（' + unit + '）</span></span>' +
+      '<span style="font-size:15px;font-weight:700">合計 ' + total + '枚</span>' +
+    '</div>' +
+    '<div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:4px">' +
       '<button data-adj="' + id + '|' + field + '|-1" style="width:42px;height:42px;font-size:20px;border:1px solid var(--line);border-radius:10px;background:#fff">−</button>' +
-      '<input data-set="' + id + '|' + field + '" type="number" inputmode="numeric" min="0" value="' + val + '" ' +
-        'style="width:58px;height:42px;font-size:20px;font-weight:700;text-align:center;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)">' +
+      '<input data-add="' + id + '|' + field + '" type="number" inputmode="numeric" placeholder="0" value="" ' +
+        'style="width:70px;height:42px;font-size:20px;font-weight:700;text-align:center;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)">' +
       '<button data-adj="' + id + '|' + field + '|1" style="width:42px;height:42px;font-size:20px;border:1px solid var(--line);border-radius:10px;background:var(--accent-soft)">＋</button>' +
-    '</span></div>';
+      '<span style="font-size:11px;color:var(--sub);width:52px">枚を足す</span>' +
+    '</div></div>';
+}
+
+// 帳面へ記入するボタン。記入できないときは、なぜ出ないのかを必ず出す。
+function postBlock(t, attr, unposted, price, label) {
+  const isBuy = attr === "postr";
+  if (unposted > 0) {
+    return '<button class="btn" data-' + attr + '="' + t.id + '"' + (isBuy ? ' style="background:var(--out)"' : '') +
+      '>未記入の' + label + 'を帳面へ（' + unposted + '枚 ' + yen(unposted * price) + '）</button>';
+  }
+  const kaz = isBuy ? "引換" : "販売";
+  if (unposted === 0) {
+    return '<p class="note" style="margin:8px 0 0">' + label + 'は帳面に記入済み（' + kaz + 'を増やすと、また記入できます）</p>';
+  }
+  return '<p class="note" style="margin:8px 0 0;color:var(--out)">' + label + 'は帳面に ' + (-unposted) +
+    '枚ぶん多く記入されています（' + kaz + 'を増やすか、帳面の記入を直してください）</p>';
 }
 
 function ticketCardHTML(t) {
@@ -3537,8 +3558,8 @@ function ticketCardHTML(t) {
           (buyPrice !== t.price ? '｜買取 ' + yen(buyPrice) : '') +
           (t.issued ? '｜発行 ' + t.issued + '枚' : '') + '</span>' +
       '</div>' +
-      tRow(t.id, "sold", "販売", t.sold) +
-      tRow(t.id, "redeemed", "引換", t.redeemed) +
+      tRow(t.id, "sold", "販売", "販売単価 " + yen(t.price), t.sold) +
+      tRow(t.id, "redeemed", "引換", "買取単価 " + yen(buyPrice), t.redeemed) +
       '<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:13px;color:var(--sub)">' +
         '<span>未引換（残）</span>' +
         '<span style="font-weight:700;color:var(--ink)">' + Math.max(0, t.sold - t.redeemed) + '枚</span>' +
@@ -3551,18 +3572,15 @@ function ticketCardHTML(t) {
         '<span style="font-weight:600;color:var(--out)">買取（支出） ' + yen(t.redeemed * buyPrice) + '</span>' +
         '<span style="color:var(--sub)">記入済 ' + postedB + '枚</span>' +
       '</div>' +
-      (unposted > 0
-        ? '<button class="btn" data-post="' + t.id + '">未記入の売上を帳面へ（' + unposted + '枚 ' + yen(unposted * t.price) + '）</button>'
-        : '') +
-      (unpostedR > 0
-        ? '<button class="btn" data-postr="' + t.id + '" style="background:var(--out)">未記入の買取を帳面へ（' + unpostedR + '枚 ' + yen(unpostedR * buyPrice) + '）</button>'
-        : '') +
-      ((t.postedBase || 0) || (t.redeemPostedBase || 0)
-        ? '<p class="note" style="margin:10px 0 0">このチケットには、帳面と結び付いていない古い「記入済」が ' +
-            '売上' + (t.postedBase || 0) + '枚・買取' + (t.redeemPostedBase || 0) + '枚 残っています。' +
-            '帳面の記入を消したあとで枚数が合わないときは、下のボタンで帳面に合わせられます。</p>' +
-          '<button class="btn secondary" data-rebase="' + t.id + '">記入済を帳面に合わせる</button>'
-        : '') +
+      postBlock(t, "post", unposted, t.price, "売上") +
+      postBlock(t, "postr", unpostedR, buyPrice, "買取") +
+      '<p class="note" style="margin:12px 0 0">枚数を直したいときは、足す欄にマイナスの数（例：−5）を入れるか、−ボタンで戻せます。' +
+        '「記入済」は帳面の記入から数えています。' +
+        ((t.postedBase || 0) || (t.redeemPostedBase || 0)
+          ? '　※このチケットには、帳面と結び付いていない古い「記入済」が 売上' + (t.postedBase || 0) +
+            '枚・買取' + (t.redeemPostedBase || 0) + '枚 残っています。'
+          : '') + '</p>' +
+      '<button class="btn secondary" data-rebase="' + t.id + '">記入済を帳面に合わせる</button>' +
       '<button class="btn danger" data-del="' + t.id + '">このチケットを削除</button>';
   }
 }
@@ -3651,20 +3669,25 @@ $("ticketList").addEventListener("click", (e) => {
   }
 });
 $("ticketList").addEventListener("focusin", (e) => {
-  const inp = e.target.closest("[data-set]");
+  const inp = e.target.closest("[data-add]");
   if (inp) inp.select();
 });
 $("ticketList").addEventListener("change", (e) => {
-  const inp = e.target.closest("[data-set]");
+  const inp = e.target.closest("[data-add]");
   if (!inp) return;
-  const [id, field] = inp.dataset.set.split("|");
+  const n = Math.floor(Number(inp.value) || 0);
+  inp.value = "";                       // 入れたら0に戻す（続けて数えられるように）
+  if (!n) return;
+  const [id, field] = inp.dataset.add.split("|");
   const t = state.tickets.find((x) => x.id === id);
   if (!t) return;
-  t[field] = Math.max(0, Math.floor(Number(inp.value) || 0));
-  save(); refreshTicketCard(id);
+  t[field] = Math.max(0, (t[field] || 0) + n);   // 合計に足す（マイナスを入れれば戻せる）
+  save();
+  toast((n > 0 ? "＋" : "") + n + "枚　合計 " + t[field] + "枚");
+  refreshTicketCard(id);
 });
 $("ticketList").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && e.target.closest("[data-set]")) e.target.blur();
+  if (e.key === "Enter" && e.target.closest("[data-add]")) e.target.blur();
 });
 
 /* ---------- バックアップ共通 ---------- */
