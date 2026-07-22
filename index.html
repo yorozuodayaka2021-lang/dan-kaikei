@@ -211,7 +211,12 @@
       <label>金額（円）</label>
       <input type="number" id="fAmt" inputmode="numeric" placeholder="0" min="0">
       <label>レシート（任意・写真/スクショを添付）</label>
-      <input type="file" id="fReceipt" accept="image/*">
+      <div class="row2">
+        <button type="button" class="btn secondary" id="btnFCam" style="margin-top:0">📷 カメラで撮る</button>
+        <button type="button" class="btn secondary" id="btnFPick" style="margin-top:0">画像を選ぶ</button>
+      </div>
+      <p class="note" id="fReceiptName" style="margin:6px 0 0">添付なし</p>
+      <input type="file" id="fReceipt" accept="image/*" style="display:none">
       <button class="btn" id="btnSave">帳面に記入する</button>
     </div>
     <div class="card">
@@ -291,8 +296,13 @@
   <section id="tab-receipt" class="tab">
     <div class="card">
       <h2>レシート取込</h2>
-      <p class="note" style="margin:0 0 8px">スマホで撮った写真・スクショをここに入れておき、あとから帳面に割り振れます（複数選択可）。</p>
-      <input type="file" id="rFiles" accept="image/*" multiple>
+      <p class="note" style="margin:0 0 8px">レシートをその場で撮るか、撮りためた写真・スクショをまとめて入れておき、あとから帳面に割り振れます。</p>
+      <div class="row2">
+        <button type="button" class="btn" id="btnRCam" style="margin-top:0">📷 カメラで撮る</button>
+        <button type="button" class="btn secondary" id="btnRPick" style="margin-top:0">写真から選ぶ（複数可）</button>
+      </div>
+      <p class="note" style="margin:6px 0 0">「カメラで撮る」はスマホ・タブレット向けです（パソコンではファイル選択になります）。続けて撮るときは、もう一度押してください。</p>
+      <input type="file" id="rFiles" accept="image/*" multiple style="display:none">
       <div style="height:12px"></div>
       <div class="rgrid" id="receiptGrid"></div>
       <div class="empty" id="receiptEmpty">レシートはまだありません</div>
@@ -2966,8 +2976,28 @@ $("btnSave").addEventListener("click", async () => {
   state.txs.push(tx);
   save();
   $("fMemo").value = ""; $("fAmt").value = ""; $("fReceipt").value = "";
+  $("fReceiptName").textContent = "添付なし";
   toast("帳面に記入しました " + yen(amt));
   renderAll();
+});
+
+/* ---------- 写真の取り込み口（カメラ／写真選択） ----------
+   同じ file 入力に capture を付け外しして開く。スマホはカメラが直接立ち上がり、
+   パソコンでは capture が無視されて普通のファイル選択になる。 */
+function openPicker(id, useCamera) {
+  const inp = $(id);
+  if (useCamera) inp.setAttribute("capture", "environment");
+  else inp.removeAttribute("capture");
+  inp.value = "";                 // 同じ写真を続けて選んでも change が起きるように
+  inp.click();
+}
+$("btnFCam").addEventListener("click", () => openPicker("fReceipt", true));
+$("btnFPick").addEventListener("click", () => openPicker("fReceipt", false));
+$("btnRCam").addEventListener("click", () => openPicker("rFiles", true));
+$("btnRPick").addEventListener("click", () => openPicker("rFiles", false));
+$("fReceipt").addEventListener("change", () => {
+  const f = $("fReceipt").files[0];
+  $("fReceiptName").textContent = f ? "添付：" + f.name : "添付なし";
 });
 
 /* ---------- 帳面 ---------- */
@@ -3288,7 +3318,7 @@ $("rFiles").addEventListener("change", async (e) => {
   }
   save();
   e.target.value = "";
-  toast(ok + "枚を取り込みました");
+  toast(ok + "枚を取り込みました（続けて撮れます）");
   renderAll();
 });
 
