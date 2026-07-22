@@ -4,12 +4,14 @@
 
 - 出入金の入力・帳面（残高・絞り込み・修正）
 - 収支計算表（費目別の自動集計・テキストコピー）
-- レシート写真の取込と帳面への割り振り
+- レシート写真の取込と帳面への割り振り＋画像からの金額読み取り（OCR）
+- チケット（食券・催し券など）の販売/引換管理と売上の帳面記入
+- 複数人の帳面統合（各自のJSONを重複排除で合体・記入者名つき）
 - JSONバックアップ書き出し/復元、費目の自由編集
 
 ## データについて
 
-帳面データ・レシート画像は**利用端末のブラウザ内（localStorage / IndexedDB）だけ**に保存されます。サーバーへの送信は一切ありません。このリポジトリにはアプリ本体のみが含まれ、会計データは含まれません。
+帳面データ・レシート画像は**利用端末のブラウザ内（localStorage / IndexedDB）だけ**に保存されます。サーバーへの送信は一切ありません。レシートの金額読み取り（OCR）も端末内で処理され、画像が外部に出ることはありません。このリポジトリにはアプリ本体のみが含まれ、会計データは含まれません。
 
 ## 使い方
 
@@ -19,4 +21,7 @@
 
 ## クレジット
 
-QRコード描画に [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator)（MIT License, Kazuhiko Arase）を同梱しています。
+- QRコード描画：[qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator)（MIT License, Kazuhiko Arase）
+- レシートOCR：[Tesseract.js](https://github.com/naptha/tesseract.js)（Apache-2.0 License）＋日本語学習データ（tessdata_fast, Apache-2.0）
+
+いずれも `ocr/` 以下に同梱し、公開ページ自身から配信します（外部CDNに依存しません）。
