@@ -227,11 +227,17 @@
   <!-- ===== 収支表 ===== -->
   <section id="tab-summary" class="tab">
     <div class="card">
-      <h2>収支計算表（費目別）</h2>
+      <h2>前期繰越金</h2>
+      <label>前期から引き継いだ残金（円）</label>
+      <input type="number" id="carryover" inputmode="numeric" min="0" placeholder="0">
+      <p class="note">前年度・前期からの繰越金。決算書の「次期繰越金」と、帳面の残高に反映されます。無ければ0のまま。</p>
+    </div>
+    <div class="card">
+      <h2>収支決算書（費目別）</h2>
       <table id="summaryTable"></table>
-      <p class="note">※ 帳面の記入から自動集計。精算・会計報告の下書きに使えます。</p>
-      <button class="btn" id="btnPdfSummary">PDFにする（印刷 → PDFで保存）</button>
-      <button class="btn secondary" id="btnCopySummary">収支表をテキストでコピー</button>
+      <p class="note">※ 帳面の記入から自動集計。前期繰越金＋収入合計−支出合計＝次期繰越金。</p>
+      <button class="btn" id="btnPdfSummary">決算書をPDFにする（印刷 → PDFで保存）</button>
+      <button class="btn secondary" id="btnCopySummary">決算書をテキストでコピー</button>
       <p class="note">PDFは、印刷ダイアログの送信先で「PDFに保存」（iPhoneは共有→ブックへ保存など）を選ぶと作れます。</p>
     </div>
   </section>
@@ -2709,7 +2715,7 @@ const DEFAULT_CATS = {
   out: ["輸送・交通", "宿泊・食事", "行事・催し", "チケット制作", "チケット買取", "救護・衛生", "事務・雑費", "その他出金"]
 };
 
-let state = { txs: [], cats: null, receipts: [], tickets: [], author: "" };
+let state = { txs: [], cats: null, receipts: [], tickets: [], author: "", carryover: 0 };
 // txs: {id, date, kind(in|out), cat, memo, amt, receiptId|null}
 // receipts: {id, addedAt, txId|null}  画像本体はIndexedDB
 
@@ -2803,7 +2809,7 @@ function shrinkImage(file, maxSide = 1400) {
 function load() {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) state = Object.assign({ txs: [], cats: null, receipts: [], tickets: [], author: "" }, JSON.parse(raw));
+    if (raw) state = Object.assign({ txs: [], cats: null, receipts: [], tickets: [], author: "", carryover: 0 }, JSON.parse(raw));
   } catch (e) { /* 壊れていたら初期状態のまま */ }
   if (!state.cats) state.cats = JSON.parse(JSON.stringify(DEFAULT_CATS));
   if (!Array.isArray(state.tickets)) state.tickets = [];
@@ -2910,8 +2916,9 @@ $("btnSave").addEventListener("click", async () => {
 function sortedTxs() {
   return [...state.txs].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
+// 手元残高＝前期繰越金＋収入−支出（決算書の「次期繰越金」と同じ）
 function balance() {
-  return state.txs.reduce((s, t) => s + (t.kind === "in" ? t.amt : -t.amt), 0);
+  return (state.carryover || 0) + state.txs.reduce((s, t) => s + (t.kind === "in" ? t.amt : -t.amt), 0);
 }
 $("filterKind").addEventListener("change", renderLedger);
 $("filterCat").addEventListener("change", renderLedger);
@@ -3015,7 +3022,10 @@ function renderSummary() {
     state.txs.filter((t) => t.kind === kind).forEach((t) => m.set(t.cat, (m.get(t.cat) || 0) + t.amt));
     return m;
   };
+  const carry = state.carryover || 0;
+  const net = sum("in") - sum("out");
   let html = "<tr><th>費目</th><th class='num'>件数</th><th class='num'>金額</th></tr>";
+  html += `<tr><td style="font-weight:600">前期繰越金</td><td></td><td class="num" style="font-weight:700">${yen(carry)}</td></tr>`;
   const cnt = (kind, cat) => state.txs.filter((t) => t.kind === kind && t.cat === cat).length;
   for (const [label, kind, cls] of [["【収入の部】", "in", "sec-in"], ["【支出の部】", "out", "sec-out"]]) {
     html += `<tr class="${cls}"><td colspan="3" style="font-weight:700">${label}</td></tr>`;
@@ -3026,20 +3036,32 @@ function renderSummary() {
     }
     html += `<tr><td style="font-weight:600">${kind === "in" ? "収入合計" : "支出合計"}</td><td></td><td class="num" style="font-weight:700">${yen(sum(kind))}</td></tr>`;
   }
-  html += `<tr class="total"><td>差引残高</td><td></td><td class="num">${yen(sum("in") - sum("out"))}</td></tr>`;
+  html += `<tr><td style="font-weight:600">当期収支差額</td><td></td><td class="num" style="font-weight:700">${yen(net)}</td></tr>`;
+  html += `<tr class="total"><td>次期繰越金</td><td></td><td class="num">${yen(carry + net)}</td></tr>`;
   tbl.innerHTML = html;
 }
+$("carryover").addEventListener("change", () => {
+  state.carryover = Math.max(0, Math.floor(Number($("carryover").value) || 0));
+  $("carryover").value = state.carryover;
+  save();
+  toast("前期繰越金を " + yen(state.carryover) + " にしました");
+  renderAll();
+});
 $("btnCopySummary").addEventListener("click", () => {
-  const lines = ["団会計 収支計算表（" + today() + " 時点）", ""];
+  const carry = state.carryover || 0;
+  const sumOf = (kind) => state.txs.filter((t) => t.kind === kind).reduce((x, t) => x + t.amt, 0);
+  const net = sumOf("in") - sumOf("out");
+  const lines = ["団会計 収支決算書（" + today() + " 時点）", ""];
+  lines.push("前期繰越金：" + yen(carry), "");
   for (const [label, kind] of [["【収入の部】", "in"], ["【支出の部】", "out"]]) {
     lines.push(label);
     const m = new Map();
     state.txs.filter((t) => t.kind === kind).forEach((t) => m.set(t.cat, (m.get(t.cat) || 0) + t.amt));
     for (const [cat, v] of m) lines.push("  " + cat + "：" + yen(v));
-    const s = state.txs.filter((t) => t.kind === kind).reduce((x, t) => x + t.amt, 0);
-    lines.push("  " + (kind === "in" ? "収入合計" : "支出合計") + "：" + yen(s), "");
+    lines.push("  " + (kind === "in" ? "収入合計" : "支出合計") + "：" + yen(sumOf(kind)), "");
   }
-  lines.push("差引残高：" + yen(balance()));
+  lines.push("当期収支差額：" + yen(net));
+  lines.push("次期繰越金：" + yen(carry + net));
   navigator.clipboard.writeText(lines.join("\n"))
     .then(() => toast("コピーしました"))
     .catch(() => toast("コピーできませんでした"));
@@ -3054,7 +3076,9 @@ function buildSummaryPrintRows() {
     return m;
   };
   const cnt = (kind, cat) => state.txs.filter((t) => t.kind === kind && t.cat === cat).length;
-  let rows = "";
+  const carry = state.carryover || 0;
+  const net = sum("in") - sum("out");
+  let rows = `<tr class="subt"><td>前期繰越金</td><td></td><td class="num">${yen(carry)}</td></tr>`;
   for (const [label, kind] of [["【収入の部】", "in"], ["【支出の部】", "out"]]) {
     rows += `<tr class="sec"><td colspan="3">${label}</td></tr>`;
     const m = byCat(kind);
@@ -3064,12 +3088,13 @@ function buildSummaryPrintRows() {
     }
     rows += `<tr class="subt"><td>${kind === "in" ? "収入合計" : "支出合計"}</td><td></td><td class="num">${yen(sum(kind))}</td></tr>`;
   }
-  rows += `<tr class="tot"><td>差引残高</td><td></td><td class="num">${yen(sum("in") - sum("out"))}</td></tr>`;
+  rows += `<tr class="subt"><td>当期収支差額</td><td></td><td class="num">${yen(net)}</td></tr>`;
+  rows += `<tr class="tot"><td>次期繰越金</td><td></td><td class="num">${yen(carry + net)}</td></tr>`;
   return rows;
 }
 $("btnPdfSummary").addEventListener("click", () => {
   if (!state.txs.length) return toast("記入がありません");
-  const title = "団会計 収支計算表";   // ← 公開版では _regen.js で「団会計 収支計算表」に一般化
+  const title = "団会計 収支決算書";   // ← 公開版では _regen.js で「団会計 …」に一般化
   const meta = today() + " 時点" + (state.author ? "　／　記入者：" + esc(state.author) : "");
   $("printArea").innerHTML =
     `<h1>${title}</h1>` +
@@ -3498,7 +3523,7 @@ $("importFile").addEventListener("change", async (e) => {
     const payload = JSON.parse(await f.text());
     if (payload.app !== "ojiba_kaikei") throw new Error("形式違い");
     await imgClear();
-    state = Object.assign({ txs: [], cats: null, receipts: [], tickets: [], author: "" }, payload.state);
+    state = Object.assign({ txs: [], cats: null, receipts: [], tickets: [], author: "", carryover: 0 }, payload.state);
     if (!state.cats) state.cats = JSON.parse(JSON.stringify(DEFAULT_CATS));
     if (!Array.isArray(state.tickets)) state.tickets = [];
     for (const [id, dataURL] of Object.entries(payload.images || {})) {
@@ -3583,7 +3608,7 @@ $("btnWipe").addEventListener("click", async () => {
   if (!confirm("本当に消去しますか？この操作は元に戻せません。")) return;
   await imgClear();
   localStorage.removeItem(LS_KEY);
-  state = { txs: [], cats: JSON.parse(JSON.stringify(DEFAULT_CATS)), receipts: [], tickets: [], author: "" };
+  state = { txs: [], cats: JSON.parse(JSON.stringify(DEFAULT_CATS)), receipts: [], tickets: [], author: "", carryover: 0 };
   toast("初期化しました");
   renderAll();
 });
@@ -3782,6 +3807,7 @@ function renderAll() {
   renderReceipts();
   renderTickets();
   $("authorName").value = state.author || "";
+  $("carryover").value = state.carryover || 0;
   $("catInText").value = state.cats.in.join("\n");
   $("catOutText").value = state.cats.out.join("\n");
 }
