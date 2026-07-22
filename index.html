@@ -2886,6 +2886,40 @@ function load() {
     const i = state.cats.out.indexOf("チケット制作");
     state.cats.out.splice(i >= 0 ? i + 1 : state.cats.out.length, 0, "チケット買取");
   }
+  migrateTickets();
+}
+
+/* チケットの「記入済」を、帳面の記入そのものから数えられるようにする。
+   以前は枚数をチケット側に別で持っていたため、帳面の記入を消しても「記入済」が減らず、
+   枚数が合わなくなったうえ「未記入の買取を帳面へ」も出てこなくなっていた。 */
+function migrateTickets() {
+  // 旧い記入に、どのチケットの何枚かの印を付け直す（摘要から読み取る）
+  const byName = new Map();
+  state.tickets.forEach((t) => { if (!byName.has(t.name)) byName.set(t.name, t.id); });
+  state.txs.forEach((x) => {
+    if (x.ticketId) return;
+    const m = /^チケット(売上|買取)：(.+?)[\s　]+(\d+)枚$/.exec((x.memo || "").trim());
+    if (!m) return;
+    const id = byName.get(m[2]);
+    if (!id) return;
+    x.ticketId = id; x.qty = Number(m[3]); x.tkind = (m[1] === "売上") ? "sale" : "buy";
+  });
+  // 印を付けられなかったぶんだけを、これまでの「記入済」から引き継ぐ（1回だけ）
+  state.tickets.forEach((t) => {
+    if (t.mig2) return;
+    t.postedBase = Math.max(0, (t.posted || 0) - ticketPostedTx(t.id, "sale"));
+    t.redeemPostedBase = Math.max(0, (t.redeemPosted || 0) - ticketPostedTx(t.id, "buy"));
+    t.mig2 = true;
+  });
+}
+function ticketPostedTx(id, tkind) {
+  return state.txs.filter((x) => x.ticketId === id && x.tkind === tkind)
+    .reduce((s, x) => s + (Number(x.qty) || 0), 0);
+}
+// 記入済の枚数（帳面が正）
+function ticketPosted(t, tkind) {
+  const base = tkind === "sale" ? (t.postedBase || 0) : (t.redeemPostedBase || 0);
+  return base + ticketPostedTx(t.id, tkind);
 }
 function save() {
   localStorage.setItem(LS_KEY, JSON.stringify(state));
@@ -3470,7 +3504,8 @@ $("btnTicketAdd").addEventListener("click", () => {
   if (!price || price < 0) return toast("単価を入れてください");
   const issued = Number($("tIssued").value) || 0;
   const buyPrice = Number($("tBuyPrice").value) || 0;   // 0＝単価と同じ
-  state.tickets.push({ id: uid(), name, price, buyPrice, issued, sold: 0, redeemed: 0, posted: 0, redeemPosted: 0 });
+  state.tickets.push({ id: uid(), name, price, buyPrice, issued, sold: 0, redeemed: 0,
+    posted: 0, redeemPosted: 0, postedBase: 0, redeemPostedBase: 0, mig2: true });
   save();
   $("tName").value = ""; $("tPrice").value = ""; $("tIssued").value = ""; $("tBuyPrice").value = "";
   toast("チケットを追加しました");
@@ -3491,8 +3526,10 @@ function tRow(id, field, label, val) {
 function ticketCardHTML(t) {
   {
     const buyPrice = t.buyPrice || t.price;                 // 0なら単価と同じ
-    const unposted = t.sold - (t.posted || 0);              // 未記入の販売（収入）
-    const unpostedR = t.redeemed - (t.redeemPosted || 0);   // 未記入の引換（買取＝支出）
+    const postedS = ticketPosted(t, "sale");                // 帳面に記入済の販売枚数
+    const postedB = ticketPosted(t, "buy");                 // 帳面に記入済の買取枚数
+    const unposted = t.sold - postedS;                      // 未記入の販売（収入）
+    const unpostedR = t.redeemed - postedB;                 // 未記入の引換（買取＝支出）
     return '' +
       '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">' +
         '<span style="font-weight:700">' + esc(t.name) + '</span>' +
@@ -3508,17 +3545,23 @@ function ticketCardHTML(t) {
       '</div>' +
       '<div style="display:flex;justify-content:space-between;margin-top:10px;font-size:14px">' +
         '<span style="font-weight:600;color:var(--in)">売上（収入） ' + yen(t.sold * t.price) + '</span>' +
-        '<span style="color:var(--sub)">記入済 ' + (t.posted || 0) + '枚</span>' +
+        '<span style="color:var(--sub)">記入済 ' + postedS + '枚</span>' +
       '</div>' +
       '<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:14px">' +
         '<span style="font-weight:600;color:var(--out)">買取（支出） ' + yen(t.redeemed * buyPrice) + '</span>' +
-        '<span style="color:var(--sub)">記入済 ' + (t.redeemPosted || 0) + '枚</span>' +
+        '<span style="color:var(--sub)">記入済 ' + postedB + '枚</span>' +
       '</div>' +
       (unposted > 0
         ? '<button class="btn" data-post="' + t.id + '">未記入の売上を帳面へ（' + unposted + '枚 ' + yen(unposted * t.price) + '）</button>'
         : '') +
       (unpostedR > 0
         ? '<button class="btn" data-postr="' + t.id + '" style="background:var(--out)">未記入の買取を帳面へ（' + unpostedR + '枚 ' + yen(unpostedR * buyPrice) + '）</button>'
+        : '') +
+      ((t.postedBase || 0) || (t.redeemPostedBase || 0)
+        ? '<p class="note" style="margin:10px 0 0">このチケットには、帳面と結び付いていない古い「記入済」が ' +
+            '売上' + (t.postedBase || 0) + '枚・買取' + (t.redeemPostedBase || 0) + '枚 残っています。' +
+            '帳面の記入を消したあとで枚数が合わないときは、下のボタンで帳面に合わせられます。</p>' +
+          '<button class="btn secondary" data-rebase="' + t.id + '">記入済を帳面に合わせる</button>'
         : '') +
       '<button class="btn danger" data-del="' + t.id + '">このチケットを削除</button>';
   }
@@ -3563,12 +3606,13 @@ $("ticketList").addEventListener("click", (e) => {
   if (post) {
     const t = state.tickets.find((x) => x.id === post.dataset.post);
     if (!t) return;
-    const diff = t.sold - (t.posted || 0);
+    const diff = t.sold - ticketPosted(t, "sale");
     if (diff <= 0) return;
     state.txs.push({ id: uid(), date: today(), kind: "in", cat: "チケット売上",
       memo: "チケット売上：" + t.name + " " + diff + "枚", amt: diff * t.price,
-      receiptId: null, author: state.author || "" });
-    t.posted = t.sold;
+      receiptId: null, author: state.author || "",
+      ticketId: t.id, tkind: "sale", qty: diff });
+    t.posted = t.sold;   // 控え用（表示は帳面から数える）
     save(); toast("帳面に記入しました " + yen(diff * t.price));
     const y = window.scrollY; renderAll(); window.scrollTo(0, y);
     return;
@@ -3578,14 +3622,25 @@ $("ticketList").addEventListener("click", (e) => {
     const t = state.tickets.find((x) => x.id === postr.dataset.postr);
     if (!t) return;
     const buyPrice = t.buyPrice || t.price;
-    const diff = t.redeemed - (t.redeemPosted || 0);
+    const diff = t.redeemed - ticketPosted(t, "buy");
     if (diff <= 0) return;
     state.txs.push({ id: uid(), date: today(), kind: "out", cat: "チケット買取",
       memo: "チケット買取：" + t.name + " " + diff + "枚", amt: diff * buyPrice,
-      receiptId: null, author: state.author || "" });
-    t.redeemPosted = t.redeemed;
+      receiptId: null, author: state.author || "",
+      ticketId: t.id, tkind: "buy", qty: diff });
+    t.redeemPosted = t.redeemed;   // 控え用（表示は帳面から数える）
     save(); toast("帳面に記入しました " + yen(diff * buyPrice));
     const y = window.scrollY; renderAll(); window.scrollTo(0, y);
+    return;
+  }
+  const rebase = e.target.closest("[data-rebase]");
+  if (rebase) {
+    const t = state.tickets.find((x) => x.id === rebase.dataset.rebase);
+    if (!t) return;
+    if (!confirm("「記入済」を、いま帳面にある記入だけの枚数に合わせます。よろしいですか？")) return;
+    t.postedBase = 0; t.redeemPostedBase = 0;
+    t.posted = ticketPosted(t, "sale"); t.redeemPosted = ticketPosted(t, "buy");
+    save(); toast("帳面に合わせました"); refreshTicketCard(t.id);
     return;
   }
   const del = e.target.closest("[data-del]");
@@ -3800,6 +3855,7 @@ $("importFile").addEventListener("change", async (e) => {
     if (!state.budget || typeof state.budget !== "object") state.budget = {};
     if (!state.cats) state.cats = JSON.parse(JSON.stringify(DEFAULT_CATS));
     if (!Array.isArray(state.tickets)) state.tickets = [];
+    migrateTickets();
     for (const [id, dataURL] of Object.entries(payload.images || {})) {
       await imgPut(id, dataURLToBlob(dataURL));
     }
@@ -3854,6 +3910,7 @@ $("mergeFile").addEventListener("change", async (e) => {
       }
     }
     save();
+    migrateTickets();
     toast("統合しました（記入 " + addedTx + "件・画像 " + addedImg + "枚を追加）");
     renderAll();
   } catch (err) {
