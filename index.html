@@ -3108,8 +3108,44 @@ $("btnCloseEdit").addEventListener("click", closeOverlays);
 const budKey = (kind, cat) => kind + ":" + cat;
 const budOf = (key) => Math.max(0, Math.floor(Number(state.budget[key]) || 0));
 
-// その費目の摘要をまとめる（同じ摘要は合算。多すぎるときは「ほか◯件」）
-function memoOfCat(list) {
+/* 摘要のまとめ方は費目によって変える。
+   ・団費 …… 集まった隊の数（摘要の「◯◯隊」を数える）
+   ・チケット … 何を何枚（摘要の「◯◯ ◯枚」を名称ごとに合計）
+   ・その他 …… 摘要ごとに金額を並べる（同じ摘要は合算） */
+
+// 団費：摘要に出てくる「◯◯隊」の数を数える
+function memoDantai(list) {
+  const tai = new Set();
+  let noTai = 0;
+  list.forEach((t) => {
+    const found = ((t.memo || "").match(/[^\s、,／\/：:]{1,12}隊/g) || []);
+    if (found.length) found.forEach((x) => tai.add(x));
+    else noTai++;
+  });
+  if (!tai.size) return "";
+  let s = tai.size + "隊分";
+  if (noTai) s += "　ほか" + noTai + "件";
+  return s;
+}
+
+// チケット：「食券 30枚」のような摘要を名称ごとに合計する
+function memoTicket(list) {
+  const m = new Map();
+  let rest = 0;
+  list.forEach((t) => {
+    const re = /([^\s、,：:／\/]+)[\s　]*(\d+)[\s　]*枚/g;
+    let hit = false, mm;
+    while ((mm = re.exec(t.memo || ""))) { hit = true; m.set(mm[1], (m.get(mm[1]) || 0) + Number(mm[2])); }
+    if (!hit) rest++;
+  });
+  if (!m.size) return "";
+  const out = [...m.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => k + "　" + v + "枚");
+  if (rest) out.push("ほか" + rest + "件");
+  return out.join("\n");
+}
+
+// ふつうの費目：摘要ごとに金額を並べる
+function memoPlain(list) {
   const m = new Map();
   list.forEach((t) => {
     const k = (t.memo || "").trim() || "（摘要なし）";
@@ -3125,6 +3161,12 @@ function memoOfCat(list) {
   return out.join("\n");
 }
 
+function memoOfCat(cat, list) {
+  if (/団費/.test(cat)) return memoDantai(list) || memoPlain(list);
+  if (/チケット/.test(cat)) return memoTicket(list) || memoPlain(list);
+  return memoPlain(list);
+}
+
 // 費目ごとの行（予算も決算も無い費目は載せない）
 function reportRows(kind) {
   const rows = [];
@@ -3135,7 +3177,7 @@ function reportRows(kind) {
     const budget = budOf(budKey(kind, cat));
     if (!list.length && !budget) return;
     seen.add(cat);
-    rows.push({ name: cat, budget, actual: list.reduce((s, t) => s + t.amt, 0), memo: memoOfCat(list) });
+    rows.push({ name: cat, budget, actual: list.reduce((s, t) => s + t.amt, 0), memo: memoOfCat(cat, list) });
   };
   (state.cats[kind] || []).forEach(add);
   state.txs.filter((t) => t.kind === kind).forEach((t) => add(t.cat));   // 費目一覧から消された分も拾う
@@ -3446,17 +3488,12 @@ function tRow(id, field, label, val) {
     '</span></div>';
 }
 
-function renderTickets() {
-  const list = $("ticketList");
-  list.innerHTML = "";
-  $("ticketEmpty").style.display = state.tickets.length ? "none" : "block";
-  for (const t of state.tickets) {
+function ticketCardHTML(t) {
+  {
     const buyPrice = t.buyPrice || t.price;                 // 0なら単価と同じ
     const unposted = t.sold - (t.posted || 0);              // 未記入の販売（収入）
     const unpostedR = t.redeemed - (t.redeemPosted || 0);   // 未記入の引換（買取＝支出）
-    const card = document.createElement("div");
-    card.className = "card";
-    card.innerHTML =
+    return '' +
       '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">' +
         '<span style="font-weight:700">' + esc(t.name) + '</span>' +
         '<span style="font-size:12px;color:var(--sub)">単価 ' + yen(t.price) +
@@ -3484,31 +3521,47 @@ function renderTickets() {
         ? '<button class="btn" data-postr="' + t.id + '" style="background:var(--out)">未記入の買取を帳面へ（' + unpostedR + '枚 ' + yen(unpostedR * buyPrice) + '）</button>'
         : '') +
       '<button class="btn danger" data-del="' + t.id + '">このチケットを削除</button>';
+  }
+}
+
+function renderTickets() {
+  const list = $("ticketList");
+  list.innerHTML = "";
+  $("ticketEmpty").style.display = state.tickets.length ? "none" : "block";
+  for (const t of state.tickets) {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.dataset.tid = t.id;
+    card.innerHTML = ticketCardHTML(t);
     list.appendChild(card);
   }
-  list.querySelectorAll("[data-adj]").forEach((b) => b.addEventListener("click", () => {
-    const [id, field, d] = b.dataset.adj.split("|");
+}
+
+// ＋−や直接入力のたびに一覧全体を作り直すと、画面がいちばん上まで戻ってしまい
+// 「押しても反応しない」ように見える。触ったチケットのカードだけ描き直す。
+function refreshTicketCard(id) {
+  const t = state.tickets.find((x) => x.id === id);
+  const card = $("ticketList").querySelector('[data-tid="' + id + '"]');
+  if (!t || !card) return renderTickets();
+  const y = window.scrollY;
+  card.innerHTML = ticketCardHTML(t);
+  window.scrollTo(0, y);
+}
+
+/* チケット一覧の操作（要素を作り直しても効くよう、親側で一度だけ受ける） */
+$("ticketList").addEventListener("click", (e) => {
+  const adj = e.target.closest("[data-adj]");
+  if (adj) {
+    const [id, field, d] = adj.dataset.adj.split("|");
     const t = state.tickets.find((x) => x.id === id);
     if (!t) return;
     t[field] = Math.max(0, (t[field] || 0) + Number(d));
-    save(); renderTickets();
-  }));
-  list.querySelectorAll("[data-set]").forEach((inp) => {
-    // タップで数字を直接入力（テンキー）。確定時のみ保存。
-    inp.addEventListener("focus", () => inp.select());
-    const commit = () => {
-      const [id, field] = inp.dataset.set.split("|");
-      const t = state.tickets.find((x) => x.id === id);
-      if (!t) return;
-      const n = Math.max(0, Math.floor(Number(inp.value) || 0));
-      t[field] = n;
-      save(); renderTickets();
-    };
-    inp.addEventListener("change", commit);
-    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") inp.blur(); });
-  });
-  list.querySelectorAll("[data-post]").forEach((b) => b.addEventListener("click", () => {
-    const t = state.tickets.find((x) => x.id === b.dataset.post);
+    save(); refreshTicketCard(id);
+    return;
+  }
+  const post = e.target.closest("[data-post]");
+  if (post) {
+    const t = state.tickets.find((x) => x.id === post.dataset.post);
     if (!t) return;
     const diff = t.sold - (t.posted || 0);
     if (diff <= 0) return;
@@ -3516,10 +3569,13 @@ function renderTickets() {
       memo: "チケット売上：" + t.name + " " + diff + "枚", amt: diff * t.price,
       receiptId: null, author: state.author || "" });
     t.posted = t.sold;
-    save(); toast("帳面に記入しました " + yen(diff * t.price)); renderAll();
-  }));
-  list.querySelectorAll("[data-postr]").forEach((b) => b.addEventListener("click", () => {
-    const t = state.tickets.find((x) => x.id === b.dataset.postr);
+    save(); toast("帳面に記入しました " + yen(diff * t.price));
+    const y = window.scrollY; renderAll(); window.scrollTo(0, y);
+    return;
+  }
+  const postr = e.target.closest("[data-postr]");
+  if (postr) {
+    const t = state.tickets.find((x) => x.id === postr.dataset.postr);
     if (!t) return;
     const buyPrice = t.buyPrice || t.price;
     const diff = t.redeemed - (t.redeemPosted || 0);
@@ -3528,14 +3584,33 @@ function renderTickets() {
       memo: "チケット買取：" + t.name + " " + diff + "枚", amt: diff * buyPrice,
       receiptId: null, author: state.author || "" });
     t.redeemPosted = t.redeemed;
-    save(); toast("帳面に記入しました " + yen(diff * buyPrice)); renderAll();
-  }));
-  list.querySelectorAll("[data-del]").forEach((b) => b.addEventListener("click", () => {
+    save(); toast("帳面に記入しました " + yen(diff * buyPrice));
+    const y = window.scrollY; renderAll(); window.scrollTo(0, y);
+    return;
+  }
+  const del = e.target.closest("[data-del]");
+  if (del) {
     if (!confirm("このチケットを削除しますか？（帳面の記入は残ります）")) return;
-    state.tickets = state.tickets.filter((x) => x.id !== b.dataset.del);
+    state.tickets = state.tickets.filter((x) => x.id !== del.dataset.del);
     save(); renderTickets();
-  }));
-}
+  }
+});
+$("ticketList").addEventListener("focusin", (e) => {
+  const inp = e.target.closest("[data-set]");
+  if (inp) inp.select();
+});
+$("ticketList").addEventListener("change", (e) => {
+  const inp = e.target.closest("[data-set]");
+  if (!inp) return;
+  const [id, field] = inp.dataset.set.split("|");
+  const t = state.tickets.find((x) => x.id === id);
+  if (!t) return;
+  t[field] = Math.max(0, Math.floor(Number(inp.value) || 0));
+  save(); refreshTicketCard(id);
+});
+$("ticketList").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.closest("[data-set]")) e.target.blur();
+});
 
 /* ---------- バックアップ共通 ---------- */
 async function buildBackupPayload() {
