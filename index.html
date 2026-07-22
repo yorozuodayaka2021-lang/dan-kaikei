@@ -90,6 +90,22 @@
   tr.total td { font-weight: 700; border-top: 2px solid var(--ink); }
   .sec-in td:first-child { color: var(--in); }
   .sec-out td:first-child { color: var(--out); }
+  /* 決算書（様式どおりの見た目） */
+  .rptWrap { overflow-x: auto; }
+  .rpt { min-width: 480px; }
+  .rpt .rtitle { text-align: center; font-weight: 700; font-size: 15px; margin: 2px 0 4px; }
+  .rpt .rasof { text-align: right; font-size: 12px; color: var(--sub); margin-bottom: 10px; }
+  .rpt .rpart { font-weight: 700; margin: 14px 0 4px; }
+  .rpt table { border: 1px solid var(--line); }
+  .rpt th, .rpt td { border: 1px solid var(--line); vertical-align: top; }
+  .rpt th { background: #f2f2f2; text-align: center; font-weight: 700; }
+  .rpt td.memo { font-size: 11px; color: var(--sub); white-space: pre-wrap; }
+  .rpt tr.rtot td { font-weight: 700; background: #fafafa; }
+  .rpt .rsign { margin-top: 16px; font-size: 13px; line-height: 1.9; text-align: right; }
+  .budrow { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .budrow span { flex: 1; font-size: 13px; }
+  .budrow input { width: 120px; margin: 0; }
+  .budhead { font-weight: 700; margin-top: 12px; font-size: 13px; }
   /* レシート */
   .rgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .rcell { position: relative; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
@@ -147,23 +163,25 @@
   }
   .toast.show { opacity: .92; }
   textarea.io { width: 100%; height: 110px; font-size: 11px; border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
-  /* 印刷／PDF */
+  /* 印刷／PDF（決算書の様式） */
   #printArea { display: none; }
-  #printArea h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
-  #printArea .pmeta { font-size: 12px; color: #444; margin-bottom: 14px; }
-  #printArea table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  #printArea th, #printArea td { padding: 6px 8px; border-bottom: 1px solid #ccc; text-align: left; }
+  #printArea .rtitle { text-align: center; font-size: 17px; font-weight: 700; margin: 0 0 6px; }
+  #printArea .rasof { text-align: right; font-size: 12px; margin-bottom: 12px; }
+  #printArea .rpart { font-weight: 700; font-size: 13px; margin: 12px 0 4px; }
+  #printArea table { width: 100%; border-collapse: collapse; font-size: 12px; border: 1px solid #000; }
+  #printArea th, #printArea td { padding: 5px 7px; border: 1px solid #000; text-align: left; vertical-align: top; }
+  #printArea th { background: #eee; text-align: center; font-weight: 700; }
   #printArea td.num, #printArea th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  #printArea td.ind { padding-left: 20px; }
-  #printArea tr.sec td { font-weight: 700; background: #f0f0f0; }
-  #printArea tr.subt td { font-weight: 700; }
-  #printArea tr.tot td { font-weight: 700; border-top: 2px solid #000; border-bottom: 2px double #000; }
-  #printArea td.muted { color: #888; }
-  #printArea .pfoot { margin-top: 16px; font-size: 11px; color: #666; }
+  #printArea td.memo { font-size: 10.5px; white-space: pre-wrap; }
+  #printArea tr.rtot td { font-weight: 700; }
+  #printArea .rsign { margin-top: 20px; font-size: 12.5px; line-height: 2; text-align: right; }
+  #printArea .pfoot { margin-top: 14px; font-size: 10px; color: #666; }
   @media print {
+    @page { size: A4 portrait; margin: 14mm 12mm; }
     body > header, body > main, body > nav, .overlay, .toast { display: none !important; }
     body { background: #fff; padding: 0; }
-    #printArea { display: block !important; padding: 12mm 10mm; color: #000; }
+    #printArea { display: block !important; color: #000; }
+    #printArea tr { break-inside: avoid; }
   }
 </style>
 </head>
@@ -227,19 +245,46 @@
   <!-- ===== 収支表 ===== -->
   <section id="tab-summary" class="tab">
     <div class="card">
-      <h2>前期繰越金</h2>
-      <label>前期から引き継いだ残金（円）</label>
+      <h2>前年度繰越金</h2>
+      <label>前年度から引き継いだ残金（円）</label>
       <input type="number" id="carryover" inputmode="numeric" min="0" placeholder="0">
-      <p class="note">前年度・前期からの繰越金。決算書の「次期繰越金」と、帳面の残高に反映されます。無ければ0のまま。</p>
+      <p class="note">決算書では、収入の部の「繰越金」として計上されます。無ければ0のまま。</p>
     </div>
+
     <div class="card">
-      <h2>収支決算書（費目別）</h2>
-      <table id="summaryTable"></table>
-      <p class="note">※ 帳面の記入から自動集計。前期繰越金＋収入合計−支出合計＝次期繰越金。</p>
+      <h2>決算書</h2>
+      <div class="rptWrap"><div id="reportView"></div></div>
+      <p class="note">※ 帳面の記入から自動集計。収入の部の計と支出の部の計は必ず一致します（差額は支出の部の「繰越金」＝次年度繰越金）。</p>
       <button class="btn" id="btnPdfSummary">決算書をPDFにする（印刷 → PDFで保存）</button>
       <button class="btn secondary" id="btnCopySummary">決算書をテキストでコピー</button>
       <p class="note">PDFは、印刷ダイアログの送信先で「PDFに保存」（iPhoneは共有→ブックへ保存など）を選ぶと作れます。</p>
     </div>
+
+    <details class="card">
+      <summary style="font-weight:700;cursor:pointer">決算書の表題・日付・署名欄</summary>
+      <label>表題（年度を入れておくと決算書らしくなります）</label>
+      <input type="text" id="rptTitle" placeholder="立教189年度（2026年）　団会計決算書">
+      <label>基準日（「◯年◯月◯日現在」として表題の下に出ます）</label>
+      <input type="date" id="rptAsOf">
+      <label>作成日（署名欄の上に出ます）</label>
+      <input type="date" id="rptMadeOn">
+      <div class="row2">
+        <div><label>役職1</label><input type="text" id="rptRole1" placeholder="団長"></div>
+        <div><label>氏名1</label><input type="text" id="rptName1" placeholder=""></div>
+      </div>
+      <div class="row2">
+        <div><label>役職2</label><input type="text" id="rptRole2" placeholder="団会計"></div>
+        <div><label>氏名2</label><input type="text" id="rptName2" placeholder=""></div>
+      </div>
+      <p class="note">空欄のところは決算書に出ません（氏名を空にすれば手書き用の余白になります）。</p>
+    </details>
+
+    <details class="card">
+      <summary style="font-weight:700;cursor:pointer">予算を入れる（費目別）</summary>
+      <p class="note" style="margin:6px 0 0">決算書の「予算」欄に出ます。入れなければ0のままで、決算だけの表になります。</p>
+      <div id="budgetEdit"></div>
+      <button class="btn secondary" id="btnClearBudget" style="margin-top:10px">予算をすべて0に戻す</button>
+    </details>
   </section>
 
   <!-- ===== レシート ===== -->
@@ -2715,9 +2760,20 @@ const DEFAULT_CATS = {
   out: ["輸送・交通", "宿泊・食事", "行事・催し", "チケット制作", "チケット買取", "救護・衛生", "事務・雑費", "その他出金"]
 };
 
-let state = { txs: [], cats: null, receipts: [], tickets: [], author: "", carryover: 0 };
+// 決算書の見出し・署名欄の初期値（様式：年度入りの表題／〜現在／作成日／役職＋氏名）
+const DEFAULT_REPORT = {
+  title: "立教189年度（2026年）　団会計決算書",   // ← 公開版では _regen.js で団名を伏せる
+  asOf: "", madeOn: "",
+  role1: "団長", name1: "", role2: "団会計", name2: ""
+};
+const blankState = () => ({
+  txs: [], cats: null, receipts: [], tickets: [], author: "", carryover: 0,
+  budget: {}, report: Object.assign({}, DEFAULT_REPORT)
+});
+let state = blankState();
 // txs: {id, date, kind(in|out), cat, memo, amt, receiptId|null}
 // receipts: {id, addedAt, txId|null}  画像本体はIndexedDB
+// budget: {"in:費目名": 金額, "out:費目名": 金額}  決算書の予算欄
 
 const $ = (id) => document.getElementById(id);
 const yen = (n) => "¥" + Number(n || 0).toLocaleString("ja-JP");
@@ -2809,10 +2865,12 @@ function shrinkImage(file, maxSide = 1400) {
 function load() {
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) state = Object.assign({ txs: [], cats: null, receipts: [], tickets: [], author: "", carryover: 0 }, JSON.parse(raw));
+    if (raw) state = Object.assign(blankState(), JSON.parse(raw));
   } catch (e) { /* 壊れていたら初期状態のまま */ }
   if (!state.cats) state.cats = JSON.parse(JSON.stringify(DEFAULT_CATS));
   if (!Array.isArray(state.tickets)) state.tickets = [];
+  if (!state.budget || typeof state.budget !== "object") state.budget = {};
+  state.report = Object.assign({}, DEFAULT_REPORT, state.report || {});
   // 旧データの費目に「チケット買取」が無ければ補う（並びは「チケット制作」の後）
   if (Array.isArray(state.cats.out) && !state.cats.out.includes("チケット買取")) {
     const i = state.cats.out.indexOf("チケット制作");
@@ -3013,95 +3071,204 @@ $("btnDelete").addEventListener("click", async () => {
 });
 $("btnCloseEdit").addEventListener("click", closeOverlays);
 
-/* ---------- 収支表 ---------- */
-function renderSummary() {
-  const tbl = $("summaryTable");
-  const sum = (kind) => state.txs.filter((t) => t.kind === kind).reduce((s, t) => s + t.amt, 0);
-  const byCat = (kind) => {
-    const m = new Map();
-    state.txs.filter((t) => t.kind === kind).forEach((t) => m.set(t.cat, (m.get(t.cat) || 0) + t.amt));
-    return m;
-  };
-  const carry = state.carryover || 0;
-  const net = sum("in") - sum("out");
-  let html = "<tr><th>費目</th><th class='num'>件数</th><th class='num'>金額</th></tr>";
-  html += `<tr><td style="font-weight:600">前期繰越金</td><td></td><td class="num" style="font-weight:700">${yen(carry)}</td></tr>`;
-  const cnt = (kind, cat) => state.txs.filter((t) => t.kind === kind && t.cat === cat).length;
-  for (const [label, kind, cls] of [["【収入の部】", "in", "sec-in"], ["【支出の部】", "out", "sec-out"]]) {
-    html += `<tr class="${cls}"><td colspan="3" style="font-weight:700">${label}</td></tr>`;
-    const m = byCat(kind);
-    if (!m.size) html += '<tr><td colspan="3" style="color:var(--sub)">（記入なし）</td></tr>';
-    for (const [cat, v] of m) {
-      html += `<tr class="${cls}"><td style="padding-left:14px">${esc(cat)}</td><td class="num">${cnt(kind, cat)}</td><td class="num">${yen(v)}</td></tr>`;
-    }
-    html += `<tr><td style="font-weight:600">${kind === "in" ? "収入合計" : "支出合計"}</td><td></td><td class="num" style="font-weight:700">${yen(sum(kind))}</td></tr>`;
+/* ---------- 決算書 ----------
+   様式：収入の部／支出の部の2表。列は「項目・予算・決算・摘要」。
+   前年度繰越金は収入の部に、次年度繰越金は支出の部に入れ、両方の「計」が一致する形。 */
+
+const budKey = (kind, cat) => kind + ":" + cat;
+const budOf = (key) => Math.max(0, Math.floor(Number(state.budget[key]) || 0));
+
+// その費目の摘要をまとめる（同じ摘要は合算。多すぎるときは「ほか◯件」）
+function memoOfCat(list) {
+  const m = new Map();
+  list.forEach((t) => {
+    const k = (t.memo || "").trim() || "（摘要なし）";
+    m.set(k, (m.get(k) || 0) + t.amt);
+  });
+  const arr = [...m.entries()].sort((a, b) => b[1] - a[1]);
+  if (arr.length === 1 && arr[0][0] === "（摘要なし）") return "";
+  const out = arr.slice(0, 6).map(([k, v]) => k + "　" + yen(v));
+  if (arr.length > 6) {
+    const rest = arr.slice(6).reduce((s, x) => s + x[1], 0);
+    out.push("ほか" + (arr.length - 6) + "件　" + yen(rest));
   }
-  html += `<tr><td style="font-weight:600">当期収支差額</td><td></td><td class="num" style="font-weight:700">${yen(net)}</td></tr>`;
-  html += `<tr class="total"><td>次期繰越金</td><td></td><td class="num">${yen(carry + net)}</td></tr>`;
-  tbl.innerHTML = html;
+  return out.join("\n");
 }
+
+// 費目ごとの行（予算も決算も無い費目は載せない）
+function reportRows(kind) {
+  const rows = [];
+  const seen = new Set();
+  const add = (cat) => {
+    if (seen.has(cat)) return;
+    const list = state.txs.filter((t) => t.kind === kind && t.cat === cat);
+    const budget = budOf(budKey(kind, cat));
+    if (!list.length && !budget) return;
+    seen.add(cat);
+    rows.push({ name: cat, budget, actual: list.reduce((s, t) => s + t.amt, 0), memo: memoOfCat(list) });
+  };
+  (state.cats[kind] || []).forEach(add);
+  state.txs.filter((t) => t.kind === kind).forEach((t) => add(t.cat));   // 費目一覧から消された分も拾う
+  return rows;
+}
+
+function buildReport() {
+  const carry = state.carryover || 0;
+  const carryB = budOf("carry");
+  const inRows = reportRows("in");
+  const outRows = reportRows("out");
+  const inB = inRows.reduce((s, r) => s + r.budget, 0) + carryB;
+  const inA = inRows.reduce((s, r) => s + r.actual, 0) + carry;
+  const outB = outRows.reduce((s, r) => s + r.budget, 0);
+  const outA = outRows.reduce((s, r) => s + r.actual, 0);
+  return {
+    carry, carryB, inRows, outRows,
+    inTotalB: inB, inTotalA: inA,
+    nextB: inB - outB, nextA: inA - outA,      // 繰越金（次年度）＝ 収入計 − 支出（繰越を除く）
+    hasBudget: inB > 0 || outB > 0
+  };
+}
+
+// 決算書の表を組み立てる（画面用と印刷用で共通。cls で見た目だけ切り替える）
+function reportTables(r, esc2) {
+  const e = esc2 || esc;
+  const nb = r.hasBudget;
+  const head = "<tr><th>項　　目</th>" + (nb ? '<th class="num">予　算</th>' : "") +
+    '<th class="num">決　算</th><th>摘　　要</th></tr>';
+  const row = (name, b, a, memo, cls) =>
+    "<tr" + (cls ? ' class="' + cls + '"' : "") + "><td>" + e(name) + "</td>" +
+    (nb ? '<td class="num">' + yen(b) + "</td>" : "") +
+    '<td class="num">' + yen(a) + '</td><td class="memo">' + e(memo || "") + "</td></tr>";
+  const span = nb ? 4 : 3;
+
+  let h = '<div class="rpart">収入の部</div><table><tbody>' + head;
+  if (!r.inRows.length && !r.carry) h += '<tr><td colspan="' + span + '">（記入なし）</td></tr>';
+  r.inRows.forEach((x) => { h += row(x.name, x.budget, x.actual, x.memo); });
+  h += row("繰　越　金", r.carryB, r.carry, "前年度繰越金");
+  h += row("計", r.inTotalB, r.inTotalA, "", "rtot");
+  h += "</tbody></table>";
+
+  h += '<div class="rpart">支出の部</div><table><tbody>' + head;
+  r.outRows.forEach((x) => { h += row(x.name, x.budget, x.actual, x.memo); });
+  h += row("繰　越　金", r.nextB, r.nextA, "次年度繰越金");
+  h += row("計", r.inTotalB, r.inTotalA, "", "rtot");
+  h += "</tbody></table>";
+  return h;
+}
+
+// 2026-08-31 → 2026年8月31日
+function jpDate(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || "");
+  return m ? Number(m[1]) + "年" + Number(m[2]) + "月" + Number(m[3]) + "日" : "";
+}
+function reportHead() {
+  const rp = state.report;
+  let h = '<div class="rtitle">' + esc(rp.title || "決算書") + "</div>";
+  const a = jpDate(rp.asOf);
+  if (a) h += '<div class="rasof">' + a + " 現在</div>";
+  return h;
+}
+function reportSign() {
+  const rp = state.report;
+  const lines = [];
+  const d = jpDate(rp.madeOn);
+  if (d) lines.push(d);
+  const pad = (s) => esc(s) + "　　";
+  if (rp.role1 || rp.name1) lines.push(pad(rp.role1 || "") + esc(rp.name1 || ""));
+  if (rp.role2 || rp.name2) lines.push(pad(rp.role2 || "") + esc(rp.name2 || ""));
+  return lines.length ? '<div class="rsign">' + lines.join("<br>") + "</div>" : "";
+}
+
+function renderSummary() {
+  const r = buildReport();
+  $("reportView").innerHTML = '<div class="rpt">' + reportHead() + reportTables(r) + reportSign() + "</div>";
+  renderBudgetEdit();
+}
+
+/* 予算の入力欄 */
+function budRow(key, label) {
+  return '<div class="budrow"><span>' + esc(label) + '</span>' +
+    '<input type="number" inputmode="numeric" min="0" data-bud="' + esc(key) + '" value="' + budOf(key) + '"></div>';
+}
+function renderBudgetEdit() {
+  const box = $("budgetEdit");
+  let h = '<div class="budhead">収入の部</div>';
+  (state.cats.in || []).forEach((c) => { h += budRow(budKey("in", c), c); });
+  h += budRow("carry", "繰越金（前年度）");
+  h += '<div class="budhead">支出の部</div>';
+  (state.cats.out || []).forEach((c) => { h += budRow(budKey("out", c), c); });
+  h += '<p class="note">支出の部の「繰越金（次年度）」の予算は、収入計−支出計で自動計算されます。</p>';
+  box.innerHTML = h;
+}
+$("budgetEdit").addEventListener("change", (e) => {
+  const inp = e.target.closest("[data-bud]");
+  if (!inp) return;
+  const key = inp.getAttribute("data-bud");
+  const v = Math.max(0, Math.floor(Number(inp.value) || 0));
+  if (v) state.budget[key] = v; else delete state.budget[key];
+  save();
+  renderSummary();
+});
+$("btnClearBudget").addEventListener("click", () => {
+  if (!confirm("予算をすべて0に戻します。よろしいですか？")) return;
+  state.budget = {};
+  save();
+  toast("予算を0に戻しました");
+  renderSummary();
+});
+
 $("carryover").addEventListener("change", () => {
   state.carryover = Math.max(0, Math.floor(Number($("carryover").value) || 0));
   $("carryover").value = state.carryover;
   save();
-  toast("前期繰越金を " + yen(state.carryover) + " にしました");
+  toast("前年度繰越金を " + yen(state.carryover) + " にしました");
   renderAll();
 });
+
+/* 表題・日付・署名欄 */
+[["rptTitle", "title"], ["rptAsOf", "asOf"], ["rptMadeOn", "madeOn"],
+ ["rptRole1", "role1"], ["rptName1", "name1"], ["rptRole2", "role2"], ["rptName2", "name2"]]
+.forEach(([id, key]) => {
+  $(id).addEventListener("change", () => {
+    state.report[key] = $(id).value.trim();
+    save();
+    renderSummary();
+  });
+});
+
 $("btnCopySummary").addEventListener("click", () => {
-  const carry = state.carryover || 0;
-  const sumOf = (kind) => state.txs.filter((t) => t.kind === kind).reduce((x, t) => x + t.amt, 0);
-  const net = sumOf("in") - sumOf("out");
-  const lines = ["団会計 収支決算書（" + today() + " 時点）", ""];
-  lines.push("前期繰越金：" + yen(carry), "");
-  for (const [label, kind] of [["【収入の部】", "in"], ["【支出の部】", "out"]]) {
-    lines.push(label);
-    const m = new Map();
-    state.txs.filter((t) => t.kind === kind).forEach((t) => m.set(t.cat, (m.get(t.cat) || 0) + t.amt));
-    for (const [cat, v] of m) lines.push("  " + cat + "：" + yen(v));
-    lines.push("  " + (kind === "in" ? "収入合計" : "支出合計") + "：" + yen(sumOf(kind)), "");
-  }
-  lines.push("当期収支差額：" + yen(net));
-  lines.push("次期繰越金：" + yen(carry + net));
+  const r = buildReport();
+  const rp = state.report;
+  const nb = r.hasBudget;
+  const lines = [rp.title || "決算書"];
+  const a = jpDate(rp.asOf);
+  if (a) lines.push(a + " 現在");
+  const line = (name, b, x, memo) =>
+    "  " + name + "：" + (nb ? "予算 " + yen(b) + " ／ 決算 " + yen(x) : yen(x)) +
+    (memo ? "　（" + memo.replace(/\n/g, " / ") + "）" : "");
+  lines.push("", "【収入の部】");
+  r.inRows.forEach((x) => lines.push(line(x.name, x.budget, x.actual, x.memo)));
+  lines.push(line("繰越金", r.carryB, r.carry, "前年度繰越金"));
+  lines.push(line("計", r.inTotalB, r.inTotalA, ""));
+  lines.push("", "【支出の部】");
+  r.outRows.forEach((x) => lines.push(line(x.name, x.budget, x.actual, x.memo)));
+  lines.push(line("繰越金", r.nextB, r.nextA, "次年度繰越金"));
+  lines.push(line("計", r.inTotalB, r.inTotalA, ""));
+  const d = jpDate(rp.madeOn);
+  if (d) lines.push("", d);
+  if (rp.role1 || rp.name1) lines.push((rp.role1 || "") + "　" + (rp.name1 || ""));
+  if (rp.role2 || rp.name2) lines.push((rp.role2 || "") + "　" + (rp.name2 || ""));
   navigator.clipboard.writeText(lines.join("\n"))
     .then(() => toast("コピーしました"))
     .catch(() => toast("コピーできませんでした"));
 });
 
-/* ---------- 収支表をPDFに（印刷 → PDFで保存） ---------- */
-function buildSummaryPrintRows() {
-  const sum = (kind) => state.txs.filter((t) => t.kind === kind).reduce((s, t) => s + t.amt, 0);
-  const byCat = (kind) => {
-    const m = new Map();
-    state.txs.filter((t) => t.kind === kind).forEach((t) => m.set(t.cat, (m.get(t.cat) || 0) + t.amt));
-    return m;
-  };
-  const cnt = (kind, cat) => state.txs.filter((t) => t.kind === kind && t.cat === cat).length;
-  const carry = state.carryover || 0;
-  const net = sum("in") - sum("out");
-  let rows = `<tr class="subt"><td>前期繰越金</td><td></td><td class="num">${yen(carry)}</td></tr>`;
-  for (const [label, kind] of [["【収入の部】", "in"], ["【支出の部】", "out"]]) {
-    rows += `<tr class="sec"><td colspan="3">${label}</td></tr>`;
-    const m = byCat(kind);
-    if (!m.size) rows += '<tr><td colspan="3" class="muted">（記入なし）</td></tr>';
-    for (const [cat, v] of m) {
-      rows += `<tr><td class="ind">${esc(cat)}</td><td class="num">${cnt(kind, cat)}</td><td class="num">${yen(v)}</td></tr>`;
-    }
-    rows += `<tr class="subt"><td>${kind === "in" ? "収入合計" : "支出合計"}</td><td></td><td class="num">${yen(sum(kind))}</td></tr>`;
-  }
-  rows += `<tr class="subt"><td>当期収支差額</td><td></td><td class="num">${yen(net)}</td></tr>`;
-  rows += `<tr class="tot"><td>次期繰越金</td><td></td><td class="num">${yen(carry + net)}</td></tr>`;
-  return rows;
-}
+/* ---------- 決算書をPDFに（印刷 → PDFで保存） ---------- */
 $("btnPdfSummary").addEventListener("click", () => {
-  if (!state.txs.length) return toast("記入がありません");
-  const title = "団会計 収支決算書";   // ← 公開版では _regen.js で「団会計 …」に一般化
-  const meta = today() + " 時点" + (state.author ? "　／　記入者：" + esc(state.author) : "");
-  $("printArea").innerHTML =
-    `<h1>${title}</h1>` +
-    `<div class="pmeta">${meta}</div>` +
-    `<table><thead><tr><th>費目</th><th class="num">件数</th><th class="num">金額</th></tr></thead>` +
-    `<tbody>${buildSummaryPrintRows()}</tbody></table>` +
-    `<div class="pfoot">この団会計アプリで作成</div>`;
+  if (!state.txs.length && !state.carryover) return toast("記入がありません");
+  const r = buildReport();
+  $("printArea").innerHTML = reportHead() + reportTables(r) + reportSign() +
+    '<div class="pfoot">団会計アプリで作成</div>';   // ← 公開版では _regen.js で団名を伏せる
   window.print();
 });
 
@@ -3523,7 +3690,9 @@ $("importFile").addEventListener("change", async (e) => {
     const payload = JSON.parse(await f.text());
     if (payload.app !== "ojiba_kaikei") throw new Error("形式違い");
     await imgClear();
-    state = Object.assign({ txs: [], cats: null, receipts: [], tickets: [], author: "", carryover: 0 }, payload.state);
+    state = Object.assign(blankState(), payload.state);
+    state.report = Object.assign({}, DEFAULT_REPORT, state.report || {});
+    if (!state.budget || typeof state.budget !== "object") state.budget = {};
     if (!state.cats) state.cats = JSON.parse(JSON.stringify(DEFAULT_CATS));
     if (!Array.isArray(state.tickets)) state.tickets = [];
     for (const [id, dataURL] of Object.entries(payload.images || {})) {
@@ -3608,7 +3777,7 @@ $("btnWipe").addEventListener("click", async () => {
   if (!confirm("本当に消去しますか？この操作は元に戻せません。")) return;
   await imgClear();
   localStorage.removeItem(LS_KEY);
-  state = { txs: [], cats: JSON.parse(JSON.stringify(DEFAULT_CATS)), receipts: [], tickets: [], author: "", carryover: 0 };
+  state = Object.assign(blankState(), { cats: JSON.parse(JSON.stringify(DEFAULT_CATS)) });
   toast("初期化しました");
   renderAll();
 });
@@ -3808,6 +3977,14 @@ function renderAll() {
   renderTickets();
   $("authorName").value = state.author || "";
   $("carryover").value = state.carryover || 0;
+  const rp = state.report;
+  $("rptTitle").value = rp.title || "";
+  $("rptAsOf").value = rp.asOf || "";
+  $("rptMadeOn").value = rp.madeOn || "";
+  $("rptRole1").value = rp.role1 || "";
+  $("rptName1").value = rp.name1 || "";
+  $("rptRole2").value = rp.role2 || "";
+  $("rptName2").value = rp.name2 || "";
   $("catInText").value = state.cats.in.join("\n");
   $("catOutText").value = state.cats.out.join("\n");
 }
