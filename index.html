@@ -2778,7 +2778,7 @@ var qrcode = function() {
    ============================================================ */
 
 // 版の目印。PWA公開版の sw.js の CACHE と必ず同じ番号にすること。
-const APP_VERSION = "v15（2026-07-23）";
+const APP_VERSION = "v16（2026-07-23）";
 const LS_KEY = "ojiba_kaikei_v1";
 const DEFAULT_CATS = {
   in:  ["団費（大人）", "団費（小人）", "宿泊御供", "食事御供", "バス費用（集金）", "チケット売上", "その他入金"],
@@ -4228,6 +4228,17 @@ function renderAll() {
 }
 
 /* ---------- 起動 ---------- */
+// 金額などの入力欄でEnterを押したら、入力欄から抜けてスマホの文字パレット（ソフトキーボード）を閉じる。
+// 改行を使う費目一覧などの複数行欄（textarea）は対象外。
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const el = e.target;
+  if (el && el.tagName === "INPUT" && el.type !== "checkbox" && el.type !== "radio") {
+    e.preventDefault();
+    el.blur();
+  }
+});
+
 (async function init() {
   load();
   await openDB();
