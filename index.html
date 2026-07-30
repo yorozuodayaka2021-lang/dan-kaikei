@@ -2825,7 +2825,7 @@ var qrcode = function() {
    ============================================================ */
 
 // 版の目印。PWA公開版の sw.js の CACHE と必ず同じ番号にすること。
-const APP_VERSION = "v19（2026-07-23）";
+const APP_VERSION = "v20（2026-07-23）";
 const LS_KEY = "ojiba_kaikei_v1";
 const DEFAULT_CATS = {
   in:  ["団費（大人）", "団費（小人）", "宿泊御供", "食事御供", "バス費用（集金）", "チケット売上", "その他入金"],
@@ -3226,22 +3226,52 @@ const budKey = (kind, cat) => kind + ":" + cat;
 const budOf = (key) => Math.max(0, Math.floor(Number(state.budget[key]) || 0));
 
 /* 摘要のまとめ方は費目によって変える。
-   ・団費 …… 集まった隊の数（摘要の「◯◯隊」を数える）
+   ・団費 …… 人数を集計（摘要の「大人◯名」「小人◯名」「◯名／◯人」）＋隊数
    ・チケット … 何を何枚（摘要の「◯◯ ◯枚」を名称ごとに合計）
    ・その他 …… 摘要ごとに金額を並べる（同じ摘要は合算） */
 
-// 団費：摘要に出てくる「◯◯隊」の数を数える
+// 団費：摘要から人数を集計する（大人／小人／乳幼児で分け、隊数も数える）
 function memoDantai(list) {
+  let adult = 0, child = 0, infant = 0, other = 0;
+  let hasPeople = false;
   const tai = new Set();
-  let noTai = 0;
+  let noInfo = 0;
   list.forEach((t) => {
-    const found = ((t.memo || "").match(/[^\s、,／\/：:]{1,12}隊/g) || []);
-    if (found.length) found.forEach((x) => tai.add(x));
-    else noTai++;
+    const memo = t.memo || "";
+    let found = false;
+    // 「大人2名」「小人5名」「乳幼児1名」「3名」「2人」などを拾う
+    const re = /(大人|小人|乳幼児|おとな|こども)?[\s　]*(\d+)[\s　]*[名人]/g;
+    let m;
+    while ((m = re.exec(memo))) {
+      const n = Number(m[2]);
+      if (!n) continue;
+      hasPeople = true; found = true;
+      const q = m[1] || "";
+      if (/大人|おとな/.test(q)) adult += n;
+      else if (/小人|こども/.test(q)) child += n;
+      else if (/乳幼児/.test(q)) infant += n;
+      else other += n;
+    }
+    // 「◯◯隊」を数える（数字・名は隊名に含めない）
+    const taiM = memo.match(/[^\s、,／\/：:0-9名]{1,12}隊/g);
+    if (taiM) { taiM.forEach((x) => tai.add(x)); found = true; }
+    if (!found) noInfo++;
   });
-  if (!tai.size) return "";
-  let s = tai.size + "隊分";
-  if (noTai) s += "　ほか" + noTai + "件";
+  // 人数も隊も拾えなければ、ふつうの摘要（memoPlain）に任せる
+  if (!hasPeople && !tai.size) return "";
+  const parts = [];
+  if (adult) parts.push("大人" + adult + "名");
+  if (child) parts.push("小人" + child + "名");
+  if (infant) parts.push("乳幼児" + infant + "名");
+  if (other) parts.push(other + "名");
+  let s = "";
+  if (hasPeople) {
+    s = parts.join("・");
+    const totalPeople = adult + child + infant + other;
+    if (parts.length > 1) s += "　計" + totalPeople + "名";
+  }
+  if (tai.size) s += "（" + tai.size + "隊）";
+  if (noInfo) s += (s ? "　" : "") + "ほか" + noInfo + "件";
   return s;
 }
 
