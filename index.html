@@ -99,6 +99,10 @@
   /* チケットの＋−（長押し加速）。押している間にスクロールや選択メニューが出ないように */
   #ticketList [data-adj] { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; cursor: pointer; }
   #ticketList [data-adj]:active { filter: brightness(0.92); }
+  /* 引っ越しカードの見出し */
+  .moveHead { font-weight: 700; font-size: 14px; margin: 16px 0 6px; padding-top: 12px; border-top: 1px solid var(--line); }
+  #moveScanVideo { width: 100%; border-radius: 10px; background: #000; max-height: 60vh; object-fit: cover; }
+  #moveQrBox img { image-rendering: pixelated; }
   /* 決算書（様式どおりの見た目） */
   .rptWrap { overflow-x: auto; }
   .rpt { min-width: 480px; }
@@ -366,21 +370,25 @@
       </div>
     </div>
     <div class="card">
-      <h2>バックアップ（共有・書き出し）</h2>
-      <p class="note" style="margin-top:0">帳面データをJSONにします。別端末への引っ越し・控え・複数人での合体に。<br>※レシート画像も含むためファイルが大きくなることがあります。</p>
-      <button class="btn" id="btnShare">共有する（LINE・AirDropなどへ）</button>
-      <button class="btn secondary" id="btnExport">ファイルに書き出す</button>
+      <h2>引っ越し・バックアップ</h2>
+      <p class="note" style="margin-top:0">帳面を別のスマホへ移したり、控えを取ったりできます。データはこのアプリから勝手に送られることはありません（送り先はご自分で選びます）。</p>
+
+      <div class="moveHead">▶ 送る（今の端末から）</div>
+      <button class="btn" id="btnMoveCodeCopy">引っ越しコードをコピー</button>
+      <button class="btn secondary" id="btnMoveQrShow">QRで送る（対面）</button>
+      <p class="note" style="margin:6px 0 0">↑ 帳面の記入だけ（レシート画像は含みません）。手早く移すならこちら。</p>
+      <button class="btn secondary" id="btnShare" style="margin-top:10px">ファイルで送る（画像も含む・LINE/AirDrop）</button>
+      <button class="btn secondary" id="btnExport">ファイルに書き出す（画像も含む）</button>
       <p class="note" id="shareNote" style="display:none">このブラウザは直接共有に非対応です。「ファイルに書き出す」で保存してから送ってください。</p>
-    </div>
-    <div class="card">
-      <h2>復元（読み込み）</h2>
-      <p class="note" style="margin-top:0">書き出したJSONを読み込みます。<b>現在のデータは上書きされます。</b></p>
+
+      <div class="moveHead">▶ 受け取る（新しい端末で）</div>
+      <label>引っ越しコードを貼り付け</label>
+      <textarea class="io" id="moveCodeIn" style="min-height:70px" placeholder="送る側でコピーした引っ越しコードを、ここに貼り付け"></textarea>
+      <button class="btn" id="btnMoveCodeApply">このコードを読み込む</button>
+      <button class="btn secondary" id="btnMoveQrScan" style="margin-top:10px">QRを読み取る（対面・カメラ）</button>
+      <label style="margin-top:10px">ファイルから受け取る（画像も含む）</label>
       <input type="file" id="importFile" accept=".json,application/json">
-    </div>
-    <div class="card">
-      <h2>統合読み込み（複数人で帳面を合体）</h2>
-      <p class="note" style="margin-top:0">他の担当者が「JSONを書き出す」で作ったファイルを読み込むと、<b>今の帳面に追記で合体</b>します（同じ記入は二重になりません。上書きもされません）。</p>
-      <input type="file" id="mergeFile" accept=".json,application/json">
+      <p class="note" style="margin-top:8px">読み込むと、今の帳面が空なら引っ越し（上書き）。記入があるときは「上書き」か「合体（複数人で足す）」を選べます。</p>
     </div>
     <div class="card">
       <h2>費目の編集</h2>
@@ -463,6 +471,42 @@
     </div>
     <button class="btn danger" id="btnDeleteReceipt">このレシートを削除</button>
     <button class="btn secondary" id="btnCloseAssign">閉じる</button>
+  </div>
+</div>
+
+<!-- 引っ越しQR表示 -->
+<div class="overlay" id="moveQrOverlay">
+  <div class="sheet">
+    <h3>QRで送る（対面）</h3>
+    <p class="note" id="moveQrInfo" style="margin-top:0"></p>
+    <div id="moveQrBox" style="text-align:center; background:#fff; padding:10px; border-radius:10px"></div>
+    <div class="row2" id="moveQrNav" style="display:none; margin-top:10px">
+      <button class="btn secondary" id="moveQrPrev">← 前のQR</button>
+      <button class="btn secondary" id="moveQrNext">次のQR →</button>
+    </div>
+    <button class="btn secondary" id="moveQrClose" style="margin-top:10px">閉じる</button>
+  </div>
+</div>
+
+<!-- 引っ越しQR読み取り -->
+<div class="overlay" id="moveScanOverlay">
+  <div class="sheet">
+    <h3>QRを読み取る（対面）</h3>
+    <p class="note" id="moveScanInfo" style="margin-top:0"></p>
+    <video id="moveScanVideo" playsinline muted></video>
+    <div class="note" id="moveScanProg" style="font-weight:600"></div>
+    <button class="btn secondary" id="moveScanClose" style="margin-top:10px">閉じる</button>
+  </div>
+</div>
+
+<!-- 受け取り方法（上書き／合体）の選択 -->
+<div class="overlay" id="recvChooseOverlay">
+  <div class="sheet">
+    <h3>取り込み方法を選んでください</h3>
+    <p class="note" id="recvChooseInfo" style="margin-top:0; white-space:pre-line"></p>
+    <button class="btn" id="recvOverwrite">上書きする（引っ越し）</button>
+    <button class="btn secondary" id="recvMerge">合体する（複数人で足す）</button>
+    <button class="btn secondary" id="recvCancel">やめる</button>
   </div>
 </div>
 
@@ -2781,7 +2825,7 @@ var qrcode = function() {
    ============================================================ */
 
 // 版の目印。PWA公開版の sw.js の CACHE と必ず同じ番号にすること。
-const APP_VERSION = "v18（2026-07-23）";
+const APP_VERSION = "v19（2026-07-23）";
 const LS_KEY = "ojiba_kaikei_v1";
 const DEFAULT_CATS = {
   in:  ["団費（大人）", "団費（小人）", "宿泊御供", "食事御供", "バス費用（集金）", "チケット売上", "その他入金"],
@@ -3530,6 +3574,10 @@ $("btnCloseAssign").addEventListener("click", closeOverlays);
 
 function closeOverlays() {
   document.querySelectorAll(".overlay").forEach((o) => o.classList.remove("open"));
+  if (typeof stopMoveScan === "function") stopMoveScan();          // カメラを止める
+  if (typeof recvResolve !== "undefined" && recvResolve) {        // 選択中に閉じたら「やめる」扱い
+    const r = recvResolve; recvResolve = null; r(null);
+  }
 }
 document.querySelectorAll(".overlay").forEach((o) => {
   o.addEventListener("click", (e) => { if (e.target === o) closeOverlays(); });
@@ -3914,7 +3962,7 @@ $("btnShare").addEventListener("click", async () => {
       await navigator.share({
         files: [file],
         title: "団会計バックアップ",
-        text: "団会計の帳面データです。アプリの「設定 → 統合読み込み」で取り込めます。"
+        text: "団会計の帳面データです。アプリの「設定 → 引っ越し・バックアップ → ファイルから受け取る」で取り込めます。"
       });
       toast("共有しました");
       return;
@@ -3947,80 +3995,323 @@ function dataURLToBlob(u) {
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
   return new Blob([arr], { type: mime });
 }
-$("importFile").addEventListener("change", async (e) => {
-  const f = e.target.files[0];
-  if (!f) return;
-  if (!confirm("現在のデータをすべて上書きして復元します。よろしいですか？")) { e.target.value = ""; return; }
+/* ===========================================================
+   引っ越し（別端末へデータを移す）
+   ・引っ越しコード／QR … 帳面の記入だけ（レシート画像は含まない）小さなデータ
+   ・ファイル … レシート画像も含む丸ごと
+   受け取りは、今の帳面が空なら上書き、記入があれば「上書き／合体」を選ぶ。
+   =========================================================== */
+
+// UTF-8を安全にbase64へ／から
+function b64enc(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+function b64dec(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+// 引っ越しコードに入れる中身（帳面の記入だけ。レシート画像・添付リンクは持たない）
+function ledgerCoreState() {
+  return {
+    txs: state.txs.map((t) => { const c = Object.assign({}, t); delete c.receiptId; return c; }),
+    cats: state.cats,
+    tickets: state.tickets,
+    carryover: state.carryover || 0,
+    budget: state.budget || {},
+    report: state.report || {},
+    author: state.author || ""
+  };
+}
+function makeMoveCode() {
+  return "DANK1:" + b64enc(JSON.stringify({ app: "ojiba_kaikei_move", v: 1, s: ledgerCoreState() }));
+}
+// 文字列（コード全体／base64だけ／改行混じり）を引っ越しオブジェクトへ
+function parseMoveText(txt) {
+  txt = (txt || "").trim().replace(/\s+/g, "");     // QRやコピペで混じる空白・改行を除く（base64に空白は無い）
+  if (txt.indexOf("DANK1:") === 0) txt = txt.slice(6);
   try {
-    const payload = JSON.parse(await f.text());
-    if (payload.app !== "ojiba_kaikei") throw new Error("形式違い");
+    const obj = JSON.parse(b64dec(txt));
+    return (obj && obj.app === "ojiba_kaikei_move" && obj.s) ? obj : null;
+  } catch (e) { return null; }
+}
+
+// 引っ越しデータ（画像なし）を反映
+async function applyMoveState(s, mode) {
+  s = s || {};
+  const cleanTxs = (arr) => (arr || []).map((t) => { const c = Object.assign({}, t); delete c.receiptId; return c; });
+  if (mode === "overwrite") {
     await imgClear();
-    state = Object.assign(blankState(), payload.state);
-    state.report = Object.assign({}, DEFAULT_REPORT, state.report || {});
-    if (!state.budget || typeof state.budget !== "object") state.budget = {};
-    if (!state.cats) state.cats = JSON.parse(JSON.stringify(DEFAULT_CATS));
-    if (!Array.isArray(state.tickets)) state.tickets = [];
+    state = blankState();
+    state.txs = cleanTxs(s.txs);
+    state.cats = (s.cats && s.cats.in && s.cats.out) ? s.cats : JSON.parse(JSON.stringify(DEFAULT_CATS));
+    state.tickets = Array.isArray(s.tickets) ? s.tickets : [];
+    state.carryover = Math.max(0, Math.floor(Number(s.carryover) || 0));
+    state.budget = (s.budget && typeof s.budget === "object") ? s.budget : {};
+    state.report = Object.assign({}, DEFAULT_REPORT, s.report || {});
+    state.author = s.author || "";
+    state.receipts = [];
     migrateTickets();
-    for (const [id, dataURL] of Object.entries(payload.images || {})) {
-      await imgPut(id, dataURLToBlob(dataURL));
-    }
-    save();
-    toast("復元しました");
-    renderAll();
-  } catch (err) {
-    toast("復元に失敗しました（ファイルを確認）");
+    save(); renderAll();
+    return { added: state.txs.length };
   }
-  e.target.value = "";
+  // 合体（記入をidで重複排除して足す・費目は不足分を追加。他端末の繰越/予算/署名は上書きしない）
+  const haveTx = new Set(state.txs.map((t) => t.id));
+  let added = 0;
+  for (const t of cleanTxs(s.txs)) {
+    if (haveTx.has(t.id)) continue;
+    state.txs.push(t); haveTx.add(t.id); added++;
+  }
+  for (const kind of ["in", "out"]) {
+    for (const c of ((s.cats && s.cats[kind]) || [])) {
+      if (!state.cats[kind].includes(c)) state.cats[kind].push(c);
+    }
+  }
+  migrateTickets();
+  save(); renderAll();
+  return { added };
+}
+
+// 受け取りの共通口（引っ越しオブジェクト → 上書き/合体を選んで反映）
+async function receiveMoveObject(obj) {
+  if (!obj || obj.app !== "ojiba_kaikei_move" || !obj.s) return toast("引っ越しデータを読み取れませんでした");
+  let mode = "overwrite";
+  if (state.txs.length) {
+    mode = await askReceiveMode(
+      "いまの帳面に記入があります。どう取り込みますか？\n\n" +
+      "・上書き＝この端末を、受け取ったデータに置き換える（引っ越し）\n" +
+      "・合体＝いまの記入に、受け取った記入を足す（複数人）");
+    if (!mode) return;
+  }
+  const r = await applyMoveState(obj.s, mode);
+  toast(mode === "overwrite" ? "引っ越しました（記入 " + r.added + "件）" : "合体しました（記入 " + r.added + "件を追加）");
+}
+
+/* ---- 送る：引っ越しコードをコピー ---- */
+$("btnMoveCodeCopy").addEventListener("click", async () => {
+  if (!state.txs.length && !state.carryover && !state.tickets.length) return toast("移すデータがありません");
+  const code = makeMoveCode();
+  const extra = state.receipts.length ? "（レシート画像は含みません）" : "";
+  try {
+    await navigator.clipboard.writeText(code);
+    toast("引っ越しコードをコピーしました" + extra);
+  } catch (e) {
+    $("moveCodeIn").value = code;
+    $("moveCodeIn").focus(); $("moveCodeIn").select();
+    toast("自動コピーできないので下の欄に出しました。長押しでコピーしてください");
+  }
 });
 
-/* ---------- 統合読み込み（複数人の帳面を合体） ---------- */
-$("mergeFile").addEventListener("change", async (e) => {
-  const f = e.target.files[0];
-  if (!f) return;
+/* ---- 送る：QR（対面） ---- */
+const QR_CHUNK = 500;        // 1つのQRに入れるbase64の文字数（読み取りやすさ優先）
+const QR_MAX_CHUNKS = 8;     // これを超えるならQRでは送らない
+function buildMoveQrChunks() {
+  const code = makeMoveCode();
+  const b64 = code.slice(code.indexOf(":") + 1);
+  const total = Math.ceil(b64.length / QR_CHUNK);
+  if (total > QR_MAX_CHUNKS) return null;
+  const chunks = [];
+  for (let i = 0; i < total; i++) {
+    chunks.push("DKQR1|" + (i + 1) + "|" + total + "|" + b64.substr(i * QR_CHUNK, QR_CHUNK));
+  }
+  return chunks;
+}
+let moveQrChunks = [], moveQrCur = 0;
+function renderMoveQr() {
+  const qr = qrcode(0, "M");
+  qr.addData(moveQrChunks[moveQrCur]);
+  qr.make();
+  $("moveQrBox").innerHTML = qr.createImgTag(4, 4);
+  const img = $("moveQrBox").querySelector("img");
+  if (img) { img.style.maxWidth = "100%"; img.style.width = "260px"; }
+  $("moveQrInfo").textContent = (moveQrChunks.length > 1
+    ? "全 " + moveQrChunks.length + " 枚のうち " + (moveQrCur + 1) + " 枚目。新しいスマホの「QRを読み取る」で、全部のQRを順に写してください。"
+    : "新しいスマホの「QRを読み取る」で、このQRを写してください。") + "（レシート画像は含みません）";
+}
+$("btnMoveQrShow").addEventListener("click", () => {
+  if (typeof qrcode === "undefined") return toast("QRを表示できません");
+  if (!state.txs.length && !state.carryover && !state.tickets.length) return toast("移すデータがありません");
+  moveQrChunks = buildMoveQrChunks();
+  if (!moveQrChunks) return toast("記入が多いため、QRでは送れません。『引っ越しコードをコピー』で送ってください。");
+  moveQrCur = 0;
+  $("moveQrNav").style.display = moveQrChunks.length > 1 ? "flex" : "none";
+  renderMoveQr();
+  $("moveQrOverlay").classList.add("open");
+});
+$("moveQrPrev").addEventListener("click", () => { moveQrCur = (moveQrCur - 1 + moveQrChunks.length) % moveQrChunks.length; renderMoveQr(); });
+$("moveQrNext").addEventListener("click", () => { moveQrCur = (moveQrCur + 1) % moveQrChunks.length; renderMoveQr(); });
+$("moveQrClose").addEventListener("click", closeOverlays);
+
+/* ---- 受け取る：引っ越しコードを貼り付け ---- */
+$("btnMoveCodeApply").addEventListener("click", async () => {
+  const txt = $("moveCodeIn").value;
+  if (!txt.trim()) return toast("コードを貼り付けてください");
+  const obj = parseMoveText(txt);
+  if (!obj) return toast("コードを読み取れません（貼り付けが途中で切れていないか確認してください）");
+  await receiveMoveObject(obj);
+  $("moveCodeIn").value = "";
+});
+
+/* ---- 受け取る：QR読み取り（対面・カメラ） ---- */
+let scanStream = null, scanTimer = null, scanChunks = {}, scanTotal = 0, scanDetector = null;
+function updateScanProg() {
+  const got = Object.keys(scanChunks).length;
+  $("moveScanProg").textContent = scanTotal
+    ? "読み取り済み " + got + " / " + scanTotal + " 枚（残りのQRもカメラに写してください）"
+    : "QRをカメラに写してください…";
+}
+function feedScanChunk(raw) {
+  const m = /^DKQR1\|(\d+)\|(\d+)\|([\s\S]*)$/.exec(raw || "");
+  if (!m) return;
+  scanTotal = Number(m[2]);
+  scanChunks[Number(m[1])] = m[3];
+  updateScanProg();
+  if (Object.keys(scanChunks).length === scanTotal) finishScan();
+}
+async function scanTick() {
+  const v = $("moveScanVideo");
+  if (!v || v.readyState < 2 || !scanDetector) return;
+  let codes;
+  try { codes = await scanDetector.detect(v); } catch (e) { return; }
+  for (const c of codes) feedScanChunk(c.rawValue);
+}
+async function finishScan() {
+  const total = scanTotal;
+  let b64 = "";
+  for (let i = 1; i <= total; i++) b64 += (scanChunks[i] || "");
+  stopMoveScan();
+  closeOverlays();
+  let obj = null;
+  try { obj = JSON.parse(b64dec(b64)); } catch (e) { obj = null; }
+  await receiveMoveObject(obj);
+}
+async function startMoveScan() {
+  scanChunks = {}; scanTotal = 0;
+  const v = $("moveScanVideo");
+  if (!("BarcodeDetector" in window)) {
+    v.style.display = "none";
+    $("moveScanInfo").textContent =
+      "この端末はカメラでのQR読み取りに対応していません（iPhoneのSafariなど）。" +
+      "送る側で『引っ越しコードをコピー』し、こちらの『引っ越しコードを貼り付け』に貼ってください。";
+    return;
+  }
   try {
-    const payload = JSON.parse(await f.text());
-    if (payload.app !== "ojiba_kaikei") throw new Error("形式違い");
-    const incoming = payload.state || {};
-    const haveTx = new Set(state.txs.map((t) => t.id));
-    let addedTx = 0, addedImg = 0;
-    for (const t of (incoming.txs || [])) {
-      if (haveTx.has(t.id)) continue;      // 同じ記入は二重取り込みしない
-      // レシート画像も連れてくる
-      if (t.receiptId && payload.images && payload.images[t.receiptId]) {
-        if (!state.receipts.some((r) => r.id === t.receiptId)) {
-          await imgPut(t.receiptId, dataURLToBlob(payload.images[t.receiptId]));
-          const src = (incoming.receipts || []).find((r) => r.id === t.receiptId);
-          state.receipts.push({ id: t.receiptId, addedAt: (src && src.addedAt) || Date.now(), txId: t.id });
-          addedImg++;
-        }
-      }
-      state.txs.push(t);
-      haveTx.add(t.id);
-      addedTx++;
-    }
-    // 未割り振りレシートも取り込む（重複回避）
-    for (const r of (incoming.receipts || [])) {
-      if (r.txId) continue;
-      if (state.receipts.some((x) => x.id === r.id)) continue;
-      if (payload.images && payload.images[r.id]) {
-        await imgPut(r.id, dataURLToBlob(payload.images[r.id]));
-        state.receipts.push({ id: r.id, addedAt: r.addedAt || Date.now(), txId: null });
+    scanDetector = new BarcodeDetector({ formats: ["qr_code"] });
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    v.style.display = ""; v.srcObject = scanStream;
+    await v.play();
+    $("moveScanInfo").textContent = "送る側のQRをこの枠に写してください。複数枚あるときは順に写します。";
+    updateScanProg();
+    scanTimer = setInterval(scanTick, 300);
+  } catch (e) {
+    v.style.display = "none";
+    $("moveScanInfo").textContent =
+      "カメラを使えませんでした（許可されていない可能性）。『引っ越しコードを貼り付け』をお使いください。";
+  }
+}
+function stopMoveScan() {
+  if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+  if (scanStream) { scanStream.getTracks().forEach((t) => t.stop()); scanStream = null; }
+  const v = document.getElementById("moveScanVideo");
+  if (v) { try { v.pause(); } catch (e) {} v.srcObject = null; }
+}
+$("btnMoveQrScan").addEventListener("click", async () => {
+  $("moveScanInfo").textContent = "";
+  $("moveScanProg").textContent = "";
+  $("moveScanOverlay").classList.add("open");
+  await startMoveScan();
+});
+$("moveScanClose").addEventListener("click", closeOverlays);
+
+/* ---- 受け取り方法（上書き／合体）の選択 ---- */
+let recvResolve = null;
+function askReceiveMode(info) {
+  return new Promise((resolve) => {
+    recvResolve = resolve;
+    $("recvChooseInfo").textContent = info;
+    $("recvChooseOverlay").classList.add("open");
+  });
+}
+function recvChoose(v) {
+  $("recvChooseOverlay").classList.remove("open");
+  const r = recvResolve; recvResolve = null;
+  if (r) r(v);
+}
+$("recvOverwrite").addEventListener("click", () => recvChoose("overwrite"));
+$("recvMerge").addEventListener("click", () => recvChoose("merge"));
+$("recvCancel").addEventListener("click", () => recvChoose(null));
+
+/* ---- ファイルから受け取る（レシート画像も含む・上書き/合体を選ぶ） ---- */
+async function applyBackupOverwrite(payload) {
+  await imgClear();
+  state = Object.assign(blankState(), payload.state);
+  state.report = Object.assign({}, DEFAULT_REPORT, state.report || {});
+  if (!state.budget || typeof state.budget !== "object") state.budget = {};
+  if (!state.cats) state.cats = JSON.parse(JSON.stringify(DEFAULT_CATS));
+  if (!Array.isArray(state.tickets)) state.tickets = [];
+  migrateTickets();
+  for (const [id, dataURL] of Object.entries(payload.images || {})) {
+    await imgPut(id, dataURLToBlob(dataURL));
+  }
+  save(); renderAll();
+}
+async function applyBackupMerge(payload) {
+  const incoming = payload.state || {};
+  const haveTx = new Set(state.txs.map((t) => t.id));
+  let addedTx = 0, addedImg = 0;
+  for (const t of (incoming.txs || [])) {
+    if (haveTx.has(t.id)) continue;
+    if (t.receiptId && payload.images && payload.images[t.receiptId]) {
+      if (!state.receipts.some((r) => r.id === t.receiptId)) {
+        await imgPut(t.receiptId, dataURLToBlob(payload.images[t.receiptId]));
+        const src = (incoming.receipts || []).find((r) => r.id === t.receiptId);
+        state.receipts.push({ id: t.receiptId, addedAt: (src && src.addedAt) || Date.now(), txId: t.id });
         addedImg++;
       }
     }
-    // 相手の費目で不足分を追加（既存の並びは保つ）
-    for (const kind of ["in", "out"]) {
-      for (const c of ((incoming.cats && incoming.cats[kind]) || [])) {
-        if (!state.cats[kind].includes(c)) state.cats[kind].push(c);
-      }
-    }
-    save();
-    migrateTickets();
-    toast("統合しました（記入 " + addedTx + "件・画像 " + addedImg + "枚を追加）");
-    renderAll();
-  } catch (err) {
-    toast("統合に失敗しました（ファイルを確認）");
+    state.txs.push(t); haveTx.add(t.id); addedTx++;
   }
+  for (const r of (incoming.receipts || [])) {
+    if (r.txId) continue;
+    if (state.receipts.some((x) => x.id === r.id)) continue;
+    if (payload.images && payload.images[r.id]) {
+      await imgPut(r.id, dataURLToBlob(payload.images[r.id]));
+      state.receipts.push({ id: r.id, addedAt: r.addedAt || Date.now(), txId: null });
+      addedImg++;
+    }
+  }
+  for (const kind of ["in", "out"]) {
+    for (const c of ((incoming.cats && incoming.cats[kind]) || [])) {
+      if (!state.cats[kind].includes(c)) state.cats[kind].push(c);
+    }
+  }
+  save(); migrateTickets(); renderAll();
+  return { addedTx, addedImg };
+}
+$("importFile").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  let payload;
+  try { payload = JSON.parse(await f.text()); }
+  catch (err) { toast("ファイルを読めません"); e.target.value = ""; return; }
+  if (payload.app !== "ojiba_kaikei") { toast("これは団会計のバックアップファイルではありません"); e.target.value = ""; return; }
+  let mode = "overwrite";
+  if (state.txs.length) {
+    mode = await askReceiveMode(
+      "いまの帳面に記入があります。どう取り込みますか？\n\n" +
+      "・上書き＝この端末を、ファイルの内容に置き換える\n" +
+      "・合体＝いまの記入に、ファイルの記入を足す（複数人）");
+    if (!mode) { e.target.value = ""; return; }
+  }
+  try {
+    if (mode === "overwrite") { await applyBackupOverwrite(payload); toast("上書きで読み込みました"); }
+    else { const r = await applyBackupMerge(payload); toast("合体しました（記入 " + r.addedTx + "件・画像 " + r.addedImg + "枚を追加）"); }
+  } catch (err) { toast("読み込みに失敗しました（ファイルを確認）"); }
   e.target.value = "";
 });
 
