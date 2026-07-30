@@ -96,6 +96,9 @@
   #ledgerTotals .tline b { font-size: 15px; font-variant-numeric: tabular-nums; }
   #ledgerTotals .tdiff { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 6px; }
   #ledgerTotals .tnote { font-size: 11px; color: var(--sub); margin-top: 4px; }
+  /* チケットの＋−（長押し加速）。押している間にスクロールや選択メニューが出ないように */
+  #ticketList [data-adj] { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; cursor: pointer; }
+  #ticketList [data-adj]:active { filter: brightness(0.92); }
   /* 決算書（様式どおりの見た目） */
   .rptWrap { overflow-x: auto; }
   .rpt { min-width: 480px; }
@@ -2778,7 +2781,7 @@ var qrcode = function() {
    ============================================================ */
 
 // 版の目印。PWA公開版の sw.js の CACHE と必ず同じ番号にすること。
-const APP_VERSION = "v16（2026-07-23）";
+const APP_VERSION = "v17（2026-07-23）";
 const LS_KEY = "ojiba_kaikei_v1";
 const DEFAULT_CATS = {
   in:  ["団費（大人）", "団費（小人）", "宿泊御供", "食事御供", "バス費用（集金）", "チケット売上", "その他入金"],
@@ -3647,15 +3650,7 @@ function refreshTicketCard(id) {
 
 /* チケット一覧の操作（要素を作り直しても効くよう、親側で一度だけ受ける） */
 $("ticketList").addEventListener("click", (e) => {
-  const adj = e.target.closest("[data-adj]");
-  if (adj) {
-    const [id, field, d] = adj.dataset.adj.split("|");
-    const t = state.tickets.find((x) => x.id === id);
-    if (!t) return;
-    t[field] = Math.max(0, (t[field] || 0) + Number(d));
-    save(); refreshTicketCard(id);
-    return;
-  }
+  // ＋−（data-adj）は押しっぱなし対応のため pointer 側で処理する（ここでは扱わない）
   const post = e.target.closest("[data-post]");
   if (post) {
     const t = state.tickets.find((x) => x.id === post.dataset.post);
@@ -3725,6 +3720,56 @@ $("ticketList").addEventListener("change", (e) => {
 $("ticketList").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && e.target.closest("[data-add]")) e.target.blur();
 });
+
+/* ＋−ボタンの押しっぱなし加速。
+   ・タップ＝1回だけ増減
+   ・押し続けると、だんだん速く・1回の増分も大きくなる（1→5→10枚）
+   離した位置の数字で確定するので、行き過ぎたら反対のボタンで戻せる。 */
+let holdTimer = null, holdActive = false;
+function ticketHoldStep(id, field, dir, count) {
+  const t = state.tickets.find((x) => x.id === id);
+  if (!t) { stopTicketHold(); return; }
+  const stepSize = count < 20 ? 1 : count < 40 ? 5 : 10;   // 増分（押すほど大きく）
+  t[field] = Math.max(0, (t[field] || 0) + dir * stepSize);
+  save();
+  refreshTicketCard(id);
+  if (!holdActive) return;
+  const delay = count < 6 ? 280 : count < 20 ? 110 : count < 40 ? 55 : 35;   // 間隔（押すほど短く）
+  holdTimer = setTimeout(() => ticketHoldStep(id, field, dir, count + 1), delay);
+}
+let holdPointerId = null;
+function startTicketHold(btn, e) {
+  const [id, field, d] = btn.dataset.adj.split("|");
+  stopTicketHold();
+  holdActive = true;
+  // ＋−を押すたびにカードを描き直す＝ボタンのDOMが差し替わる。
+  // そのままだと押している指が「宙に浮いて」pointercancelが飛び、1回で止まってしまう。
+  // 指を一覧そのもの（差し替わらない親）に固定して、描き直しても押し続けられるようにする。
+  const cont = $("ticketList");
+  if (e && cont.setPointerCapture) {
+    try { cont.setPointerCapture(e.pointerId); holdPointerId = e.pointerId; } catch (err) { /* 無理なら無視 */ }
+  }
+  ticketHoldStep(id, field, Number(d) < 0 ? -1 : 1, 0);   // まず1回。押し続ければ加速して続く
+}
+function stopTicketHold() {
+  holdActive = false;
+  if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+  if (holdPointerId !== null) {
+    try { $("ticketList").releasePointerCapture(holdPointerId); } catch (err) { /* 既に解放済みなら無視 */ }
+    holdPointerId = null;
+  }
+}
+$("ticketList").addEventListener("pointerdown", (e) => {
+  const btn = e.target.closest("[data-adj]");
+  if (!btn) return;
+  e.preventDefault();          // 長押しの選択・コンテキストメニューを防ぐ
+  startTicketHold(btn, e);
+});
+// 指・マウスを離す／取り消しで止める（親に固定しているので、これらは親から拾える）
+["pointerup", "pointercancel"].forEach((ev) =>
+  $("ticketList").addEventListener(ev, stopTicketHold));
+window.addEventListener("pointerup", stopTicketHold);   // 保険（親の外で離した場合）
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopTicketHold(); });
 
 /* ---------- バックアップ共通 ---------- */
 async function buildBackupPayload() {
