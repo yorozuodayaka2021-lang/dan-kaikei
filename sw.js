@@ -2,7 +2,7 @@
 // オフラインでもアプリが開けるよう、アプリ本体をキャッシュする。
 // 更新を配信するときは CACHE のバージョン番号を上げること。
 "use strict";
-const CACHE = "dan-kaikei-v21";
+const CACHE = "dan-kaikei-v22";
 const ASSETS = [
   "./",
   "./index.html",

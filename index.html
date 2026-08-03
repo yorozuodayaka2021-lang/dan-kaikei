@@ -99,6 +99,7 @@
   /* チケットの＋−（長押し加速）。押している間にスクロールや選択メニューが出ないように */
   #ticketList [data-adj] { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; cursor: pointer; }
   #ticketList [data-adj]:active { filter: brightness(0.92); }
+  .tkSum { margin-top: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #fbfbf8; }
   /* 引っ越しカードの見出し */
   .moveHead { font-weight: 700; font-size: 14px; margin: 16px 0 6px; padding-top: 12px; border-top: 1px solid var(--line); }
   #moveScanVideo { width: 100%; border-radius: 10px; background: #000; max-height: 60vh; object-fit: cover; }
@@ -2825,7 +2826,7 @@ var qrcode = function() {
    ============================================================ */
 
 // 版の目印。PWA公開版の sw.js の CACHE と必ず同じ番号にすること。
-const APP_VERSION = "v21（2026-07-23）";
+const APP_VERSION = "v22（2026-07-23）";
 const LS_KEY = "ojiba_kaikei_v1";
 const DEFAULT_CATS = {
   in:  ["団費", "宿泊御供", "食事御供", "バス費用（集金）", "チケット売上", "その他入金"],
@@ -2999,9 +3000,46 @@ function migrateAll() {
   migrateTickets();
 }
 
-/* チケットの「記入済」を、帳面の記入そのものから数えられるようにする。
-   以前は枚数をチケット側に別で持っていたため、帳面の記入を消しても「記入済」が減らず、
-   枚数が合わなくなったうえ「未記入の買取を帳面へ」も出てこなくなっていた。 */
+/* チケットの収支はチケットタブで管理し、帳面には
+   「チケットごとに売上1行・買取1行」だけを自動で載せる（枚数を変えるとその行が更新される）。
+   以前は押すたびに別の記入が増えていたため、帳面が同じチケットの行だらけになっていた。 */
+
+// 自動で作る記入のid（チケットidから決まるので、何度直しても同じ行が更新される）
+const tkTxId = (ticketId, tkind) => "tk_" + tkind + "_" + ticketId;
+
+function syncTicketTxs() {
+  const drop = new Set();
+  for (const t of state.tickets) {
+    const buyPrice = t.buyPrice || t.price;
+    for (const [tkind, qty, unit, kind, cat, label] of [
+      ["sale", t.sold || 0, t.price, "in", "チケット売上", "チケット売上"],
+      ["buy", t.redeemed || 0, buyPrice, "out", "チケット買取", "チケット買取"]
+    ]) {
+      const id = tkTxId(t.id, tkind);
+      if (qty <= 0) { drop.add(id); continue; }      // 枚数0の行は載せない
+      const memo = label + "：" + t.name + " " + qty + "枚";
+      const amt = qty * unit;
+      const cur = state.txs.find((x) => x.id === id);
+      if (cur) {
+        cur.kind = kind; cur.cat = cat; cur.memo = memo; cur.amt = amt;
+        cur.qty = qty; cur.ticketId = t.id; cur.tkind = tkind; cur.auto = true;
+      } else {
+        state.txs.push({ id, date: today(), kind, cat, memo, amt, receiptId: null,
+          author: state.author || "", ticketId: t.id, tkind, qty, auto: true });
+      }
+    }
+  }
+  // 触るのは自分のチケットの行だけ。
+  // （他の担当者から合体で受け取った行まで消さないよう、ここでは対象を絞る）
+  if (drop.size) state.txs = state.txs.filter((x) => !drop.has(x.id));
+}
+
+// チケットを消したときは、その分の自動記入も名指しで取り除く
+function removeTicketTxs(ticketId) {
+  const ids = new Set([tkTxId(ticketId, "sale"), tkTxId(ticketId, "buy")]);
+  state.txs = state.txs.filter((x) => !ids.has(x.id));
+}
+
 function migrateTickets() {
   // 旧い記入に、どのチケットの何枚かの印を付け直す（摘要から読み取る）
   const byName = new Map();
@@ -3014,22 +3052,24 @@ function migrateTickets() {
     if (!id) return;
     x.ticketId = id; x.qty = Number(m[3]); x.tkind = (m[1] === "売上") ? "sale" : "buy";
   });
-  // 印を付けられなかったぶんだけを、これまでの「記入済」から引き継ぐ（1回だけ）
-  state.tickets.forEach((t) => {
-    if (t.mig2) return;
-    t.postedBase = Math.max(0, (t.posted || 0) - ticketPostedTx(t.id, "sale"));
-    t.redeemPostedBase = Math.max(0, (t.redeemPosted || 0) - ticketPostedTx(t.id, "buy"));
-    t.mig2 = true;
+  // 旧方式で積み上がっていた「チケットの記入」は、チケットごとの1行にまとめ直す。
+  // （枚数の正はチケットタブなので、そちらから作り直す。チケットが消えている分はそのまま残す）
+  const live = new Set(state.tickets.map((t) => t.id));
+  const firstDate = {};
+  state.txs.forEach((x) => {
+    if (!x.tkind || !live.has(x.ticketId)) return;
+    const k = tkTxId(x.ticketId, x.tkind);
+    if (!firstDate[k] || (x.date && x.date < firstDate[k])) firstDate[k] = x.date;
   });
-}
-function ticketPostedTx(id, tkind) {
-  return state.txs.filter((x) => x.ticketId === id && x.tkind === tkind)
-    .reduce((s, x) => s + (Number(x.qty) || 0), 0);
-}
-// 記入済の枚数（帳面が正）
-function ticketPosted(t, tkind) {
-  const base = tkind === "sale" ? (t.postedBase || 0) : (t.redeemPostedBase || 0);
-  return base + ticketPostedTx(t.id, tkind);
+  state.txs = state.txs.filter((x) => !(x.tkind && live.has(x.ticketId)));
+  syncTicketTxs();
+  // 元の日付（最初に記入した日）を引き継ぐ
+  state.txs.forEach((x) => { if (x.auto && firstDate[x.id]) x.date = firstDate[x.id]; });
+  // 使わなくなった控えを片付ける
+  state.tickets.forEach((t) => {
+    delete t.posted; delete t.redeemPosted;
+    delete t.postedBase; delete t.redeemPostedBase; delete t.mig2;
+  });
 }
 function save() {
   localStorage.setItem(LS_KEY, JSON.stringify(state));
@@ -3201,6 +3241,7 @@ function renderLedger() {
       '<span class="date">' + t.date.slice(5).replace("-", "/") + "</span>" +
       '<span class="body"><span class="cat">' + esc(t.cat) + "</span>" +
       '<div class="memo">' + (t.memo ? esc(t.memo) + " " : "") + who + (t.memo || who ? "" : "&nbsp;") + "</div></span>" +
+      (t.auto ? '<span class="clip" title="チケットで管理している記入">🎫</span>' : "") +
       (t.receiptId ? '<span class="clip">🧾</span>' : "") +
       '<span class="amt ' + t.kind + '">' + (t.kind === "in" ? "+" : "−") + yen(t.amt).slice(1) + "</span>";
     d.addEventListener("click", () => openEdit(t.id));
@@ -3216,6 +3257,12 @@ let editId = null;
 async function openEdit(id) {
   const t = state.txs.find((x) => x.id === id);
   if (!t) return;
+  // チケットが自動で載せている行は、ここで直すとまた上書きされてしまう。チケットタブへ案内する。
+  if (t.auto) {
+    toast("この記入はチケットで管理しています。枚数はチケットのタブで直してください");
+    document.querySelector('nav button[data-tab="ticket"]').click();
+    return;
+  }
   editId = id;
   segSet("eKindSeg", t.kind);
   fillCatSelect("eCat", t.kind, t.cat);
@@ -3665,8 +3712,8 @@ $("btnTicketAdd").addEventListener("click", () => {
   if (!price || price < 0) return toast("単価を入れてください");
   const issued = Number($("tIssued").value) || 0;
   const buyPrice = Number($("tBuyPrice").value) || 0;   // 0＝単価と同じ
-  state.tickets.push({ id: uid(), name, price, buyPrice, issued, sold: 0, redeemed: 0,
-    posted: 0, redeemPosted: 0, postedBase: 0, redeemPostedBase: 0, mig2: true });
+  state.tickets.push({ id: uid(), name, price, buyPrice, issued, sold: 0, redeemed: 0 });
+  syncTicketTxs();
   save();
   $("tName").value = ""; $("tPrice").value = ""; $("tIssued").value = ""; $("tBuyPrice").value = "";
   toast("チケットを追加しました");
@@ -3690,61 +3737,40 @@ function tRow(id, field, label, unit, total) {
     '</div></div>';
 }
 
-// 帳面へ記入するボタン。記入できないときは、なぜ出ないのかを必ず出す。
-function postBlock(t, attr, unposted, price, label) {
-  const isBuy = attr === "postr";
-  if (unposted > 0) {
-    return '<button class="btn" data-' + attr + '="' + t.id + '"' + (isBuy ? ' style="background:var(--out)"' : '') +
-      '>未記入の' + label + 'を帳面へ（' + unposted + '枚 ' + yen(unposted * price) + '）</button>';
-  }
-  const kaz = isBuy ? "引換" : "販売";
-  if (unposted === 0) {
-    return '<p class="note" style="margin:8px 0 0">' + label + 'は帳面に記入済み（' + kaz + 'を増やすと、また記入できます）</p>';
-  }
-  return '<p class="note" style="margin:8px 0 0;color:var(--out)">' + label + 'は帳面に ' + (-unposted) +
-    '枚ぶん多く記入されています（' + kaz + 'を増やすか、帳面の記入を直してください）</p>';
-}
-
 function ticketCardHTML(t) {
-  {
-    const buyPrice = t.buyPrice || t.price;                 // 0なら単価と同じ
-    const postedS = ticketPosted(t, "sale");                // 帳面に記入済の販売枚数
-    const postedB = ticketPosted(t, "buy");                 // 帳面に記入済の買取枚数
-    const unposted = t.sold - postedS;                      // 未記入の販売（収入）
-    const unpostedR = t.redeemed - postedB;                 // 未記入の引換（買取＝支出）
-    return '' +
-      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">' +
-        '<span style="font-weight:700">' + esc(t.name) + '</span>' +
-        '<span style="font-size:12px;color:var(--sub)">単価 ' + yen(t.price) +
-          (buyPrice !== t.price ? '｜買取 ' + yen(buyPrice) : '') +
-          (t.issued ? '｜発行 ' + t.issued + '枚' : '') + '</span>' +
+  const buyPrice = t.buyPrice || t.price;                 // 0なら単価と同じ
+  const sale = (t.sold || 0) * t.price;                   // 売上（収入）
+  const buy = (t.redeemed || 0) * buyPrice;               // 買取（支出）
+  return '' +
+    '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">' +
+      '<span style="font-weight:700">' + esc(t.name) + '</span>' +
+      '<span style="font-size:12px;color:var(--sub)">単価 ' + yen(t.price) +
+        (buyPrice !== t.price ? '｜買取 ' + yen(buyPrice) : '') +
+        (t.issued ? '｜発行 ' + t.issued + '枚' : '') + '</span>' +
+    '</div>' +
+    tRow(t.id, "sold", "販売", "販売単価 " + yen(t.price), t.sold || 0) +
+    tRow(t.id, "redeemed", "引換", "買取単価 " + yen(buyPrice), t.redeemed || 0) +
+    '<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:13px;color:var(--sub)">' +
+      '<span>未引換（残）</span>' +
+      '<span style="font-weight:700;color:var(--ink)">' + Math.max(0, (t.sold || 0) - (t.redeemed || 0)) + '枚</span>' +
+    '</div>' +
+    '<div class="tkSum">' +
+      '<div style="display:flex;justify-content:space-between;font-size:14px">' +
+        '<span style="font-weight:600;color:var(--in)">売上（収入）</span>' +
+        '<span style="font-weight:700;color:var(--in)">' + yen(sale) + '</span>' +
       '</div>' +
-      // 帳面へ記入するボタンは、販売・引換の入力欄より上に置く（数えたらすぐ記入できるように）
-      postBlock(t, "post", unposted, t.price, "売上") +
-      postBlock(t, "postr", unpostedR, buyPrice, "買取") +
-      tRow(t.id, "sold", "販売", "販売単価 " + yen(t.price), t.sold) +
-      tRow(t.id, "redeemed", "引換", "買取単価 " + yen(buyPrice), t.redeemed) +
-      '<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:13px;color:var(--sub)">' +
-        '<span>未引換（残）</span>' +
-        '<span style="font-weight:700;color:var(--ink)">' + Math.max(0, t.sold - t.redeemed) + '枚</span>' +
+      '<div style="display:flex;justify-content:space-between;margin-top:4px;font-size:14px">' +
+        '<span style="font-weight:600;color:var(--out)">買取（支出）</span>' +
+        '<span style="font-weight:700;color:var(--out)">' + yen(buy) + '</span>' +
       '</div>' +
-      '<div style="display:flex;justify-content:space-between;margin-top:10px;font-size:14px">' +
-        '<span style="font-weight:600;color:var(--in)">売上（収入） ' + yen(t.sold * t.price) + '</span>' +
-        '<span style="color:var(--sub)">記入済 ' + postedS + '枚</span>' +
+      '<div style="display:flex;justify-content:space-between;margin-top:6px;padding-top:6px;border-top:1px solid var(--line);font-size:14px">' +
+        '<span style="font-weight:700">差引</span>' +
+        '<span style="font-weight:700">' + yen(sale - buy) + '</span>' +
       '</div>' +
-      '<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:14px">' +
-        '<span style="font-weight:600;color:var(--out)">買取（支出） ' + yen(t.redeemed * buyPrice) + '</span>' +
-        '<span style="color:var(--sub)">記入済 ' + postedB + '枚</span>' +
-      '</div>' +
-      '<p class="note" style="margin:12px 0 0">枚数を直したいときは、足す欄にマイナスの数（例：−5）を入れるか、−ボタンで戻せます。' +
-        '「記入済」は帳面の記入から数えています。' +
-        ((t.postedBase || 0) || (t.redeemPostedBase || 0)
-          ? '　※このチケットには、帳面と結び付いていない古い「記入済」が 売上' + (t.postedBase || 0) +
-            '枚・買取' + (t.redeemPostedBase || 0) + '枚 残っています。'
-          : '') + '</p>' +
-      '<button class="btn secondary" data-rebase="' + t.id + '">記入済を帳面に合わせる</button>' +
-      '<button class="btn danger" data-del="' + t.id + '">このチケットを削除</button>';
-  }
+      '<p class="note" style="margin:6px 0 0">✓ 帳面に自動で載っています（このチケットの売上1行・買取1行）。枚数を直すと帳面の金額も変わります。</p>' +
+    '</div>' +
+    '<p class="note" style="margin:12px 0 0">枚数を減らすときは、足す欄にマイナスの数（例：−5）を入れるか、−ボタンで戻せます。</p>' +
+    '<button class="btn danger" data-del="' + t.id + '">このチケットを削除</button>';
 }
 
 function renderTickets() {
@@ -3774,52 +3800,12 @@ function refreshTicketCard(id) {
 /* チケット一覧の操作（要素を作り直しても効くよう、親側で一度だけ受ける） */
 $("ticketList").addEventListener("click", (e) => {
   // ＋−（data-adj）は押しっぱなし対応のため pointer 側で処理する（ここでは扱わない）
-  const post = e.target.closest("[data-post]");
-  if (post) {
-    const t = state.tickets.find((x) => x.id === post.dataset.post);
-    if (!t) return;
-    const diff = t.sold - ticketPosted(t, "sale");
-    if (diff <= 0) return;
-    state.txs.push({ id: uid(), date: today(), kind: "in", cat: "チケット売上",
-      memo: "チケット売上：" + t.name + " " + diff + "枚", amt: diff * t.price,
-      receiptId: null, author: state.author || "",
-      ticketId: t.id, tkind: "sale", qty: diff });
-    t.posted = t.sold;   // 控え用（表示は帳面から数える）
-    save(); toast("帳面に記入しました " + yen(diff * t.price));
-    const y = window.scrollY; renderAll(); window.scrollTo(0, y);
-    return;
-  }
-  const postr = e.target.closest("[data-postr]");
-  if (postr) {
-    const t = state.tickets.find((x) => x.id === postr.dataset.postr);
-    if (!t) return;
-    const buyPrice = t.buyPrice || t.price;
-    const diff = t.redeemed - ticketPosted(t, "buy");
-    if (diff <= 0) return;
-    state.txs.push({ id: uid(), date: today(), kind: "out", cat: "チケット買取",
-      memo: "チケット買取：" + t.name + " " + diff + "枚", amt: diff * buyPrice,
-      receiptId: null, author: state.author || "",
-      ticketId: t.id, tkind: "buy", qty: diff });
-    t.redeemPosted = t.redeemed;   // 控え用（表示は帳面から数える）
-    save(); toast("帳面に記入しました " + yen(diff * buyPrice));
-    const y = window.scrollY; renderAll(); window.scrollTo(0, y);
-    return;
-  }
-  const rebase = e.target.closest("[data-rebase]");
-  if (rebase) {
-    const t = state.tickets.find((x) => x.id === rebase.dataset.rebase);
-    if (!t) return;
-    if (!confirm("「記入済」を、いま帳面にある記入だけの枚数に合わせます。よろしいですか？")) return;
-    t.postedBase = 0; t.redeemPostedBase = 0;
-    t.posted = ticketPosted(t, "sale"); t.redeemPosted = ticketPosted(t, "buy");
-    save(); toast("帳面に合わせました"); refreshTicketCard(t.id);
-    return;
-  }
   const del = e.target.closest("[data-del]");
   if (del) {
-    if (!confirm("このチケットを削除しますか？（帳面の記入は残ります）")) return;
+    if (!confirm("このチケットを削除しますか？（帳面のこのチケットの記入も消えます）")) return;
     state.tickets = state.tickets.filter((x) => x.id !== del.dataset.del);
-    save(); renderTickets();
+    removeTicketTxs(del.dataset.del);
+    save(); renderAll();
   }
 });
 $("ticketList").addEventListener("focusin", (e) => {
@@ -3836,6 +3822,7 @@ $("ticketList").addEventListener("change", (e) => {
   const t = state.tickets.find((x) => x.id === id);
   if (!t) return;
   t[field] = Math.max(0, (t[field] || 0) + n);   // 合計に足す（マイナスを入れれば戻せる）
+  syncTicketTxs();
   save();
   toast((n > 0 ? "＋" : "") + n + "枚　合計 " + t[field] + "枚");
   refreshTicketCard(id);
@@ -3854,6 +3841,7 @@ function ticketHoldStep(id, field, dir, count) {
   if (!t) { stopTicketHold(); return; }
   const stepSize = count < 20 ? 1 : count < 40 ? 5 : 10;   // 増分（押すほど大きく）
   t[field] = Math.max(0, (t[field] || 0) + dir * stepSize);
+  syncTicketTxs();
   save();
   refreshTicketCard(id);
   if (!holdActive) return;
