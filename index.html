@@ -2825,10 +2825,10 @@ var qrcode = function() {
    ============================================================ */
 
 // 版の目印。PWA公開版の sw.js の CACHE と必ず同じ番号にすること。
-const APP_VERSION = "v20（2026-07-23）";
+const APP_VERSION = "v21（2026-07-23）";
 const LS_KEY = "ojiba_kaikei_v1";
 const DEFAULT_CATS = {
-  in:  ["団費（大人）", "団費（小人）", "宿泊御供", "食事御供", "バス費用（集金）", "チケット売上", "その他入金"],
+  in:  ["団費", "宿泊御供", "食事御供", "バス費用（集金）", "チケット売上", "その他入金"],
   out: ["輸送・交通", "宿泊・食事", "行事・催し", "チケット制作", "チケット買取", "救護・衛生", "事務・雑費", "その他出金"]
 };
 
@@ -2952,6 +2952,50 @@ function load() {
     const i = state.cats.out.indexOf("チケット制作");
     state.cats.out.splice(i >= 0 ? i + 1 : state.cats.out.length, 0, "チケット買取");
   }
+  migrateAll();
+}
+
+/* 「団費（大人）」「団費（小人）」を「団費」1つに統合する。
+   大人／小人の別は決算書の摘要で人数集計されるので、摘要に区分が書かれていない記入には
+   元の費目から区分を補っておく（そうしないと大人・小人の内訳が分からなくなるため）。 */
+const DANPI_OLD = { "団費（大人）": "大人", "団費（小人）": "小人" };
+function migrateDanpi() {
+  const cats = state.cats.in || [];
+  const hasOld = cats.some((c) => DANPI_OLD[c]) || state.txs.some((t) => DANPI_OLD[t.cat]);
+  if (!hasOld) return;
+
+  // 記入を「団費」に付け替え、必要なら摘要に区分を補う
+  state.txs.forEach((t) => {
+    const kubun = DANPI_OLD[t.cat];
+    if (!kubun) return;
+    const memo = t.memo || "";
+    if (!/大人|小人|乳幼児|おとな|こども/.test(memo)) {
+      // 「2名」「3人」のような区分なしの人数があれば「大人2名」に直す。無ければ末尾に区分を添える。
+      t.memo = /\d+[\s　]*[名人]/.test(memo)
+        ? memo.replace(/(\d+[\s　]*[名人])/, kubun + "$1")
+        : (memo ? memo + "（" + kubun + "）" : kubun);
+    }
+    t.cat = "団費";
+  });
+
+  // 予算も合算
+  const bIn = budKey("in", "団費");
+  let sum = Number(state.budget[bIn]) || 0;
+  for (const old of Object.keys(DANPI_OLD)) {
+    const k = budKey("in", old);
+    if (state.budget[k]) { sum += Number(state.budget[k]) || 0; delete state.budget[k]; }
+  }
+  if (sum) state.budget[bIn] = sum;
+
+  // 費目一覧を「団費」1つに（並びは元の位置）
+  const at = cats.findIndex((c) => DANPI_OLD[c]);
+  state.cats.in = cats.filter((c) => !DANPI_OLD[c]);
+  if (!state.cats.in.includes("団費")) state.cats.in.splice(at >= 0 ? at : 0, 0, "団費");
+}
+
+// 旧いデータの手当てをまとめて行う（起動時と、引っ越し・ファイル読み込みのあと）
+function migrateAll() {
+  migrateDanpi();
   migrateTickets();
 }
 
@@ -4086,7 +4130,7 @@ async function applyMoveState(s, mode) {
     state.report = Object.assign({}, DEFAULT_REPORT, s.report || {});
     state.author = s.author || "";
     state.receipts = [];
-    migrateTickets();
+    migrateAll();
     save(); renderAll();
     return { added: state.txs.length };
   }
@@ -4102,7 +4146,7 @@ async function applyMoveState(s, mode) {
       if (!state.cats[kind].includes(c)) state.cats[kind].push(c);
     }
   }
-  migrateTickets();
+  migrateAll();
   save(); renderAll();
   return { added };
 }
@@ -4284,7 +4328,7 @@ async function applyBackupOverwrite(payload) {
   if (!state.budget || typeof state.budget !== "object") state.budget = {};
   if (!state.cats) state.cats = JSON.parse(JSON.stringify(DEFAULT_CATS));
   if (!Array.isArray(state.tickets)) state.tickets = [];
-  migrateTickets();
+  migrateAll();
   for (const [id, dataURL] of Object.entries(payload.images || {})) {
     await imgPut(id, dataURLToBlob(dataURL));
   }
@@ -4320,7 +4364,7 @@ async function applyBackupMerge(payload) {
       if (!state.cats[kind].includes(c)) state.cats[kind].push(c);
     }
   }
-  save(); migrateTickets(); renderAll();
+  save(); migrateAll(); renderAll();
   return { addedTx, addedImg };
 }
 $("importFile").addEventListener("change", async (e) => {
